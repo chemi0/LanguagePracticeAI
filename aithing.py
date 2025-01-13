@@ -504,4 +504,7 @@ if __name__ == "__main__":
        trans_selection = TranslationLanguageWindow(trans_root, lambda trans_lang, trans_window_root: on_translation_language_selected(trans_lang, trans_window_root, show_language_selection))
        trans_root.mainloop()
 
+
+       #ghflkafdslkhfdg
+
     show_language_selection()
