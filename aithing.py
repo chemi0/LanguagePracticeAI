@@ -6,7 +6,10 @@ import tkinter as tk
 from tkinter import font, scrolledtext, ttk
 import asyncio
 
-#test
+#test somethiogsdhalkfglsakhdf ghlkasdf
+
+
+#fdkslaflhksdahklf
 
 # Configure Google Gemini API
 genai.configure(api_key="AIzaSyAurbpVsBDTcNp7VxQ4b8DTBIWjq2_PekA")
