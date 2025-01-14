@@ -16,9 +16,9 @@ translator = Translator()
 # Conversation histories for each language and role
 conversation_histories = {}
 
-# Default Language
+# Default Language and Default translation language
 DEFAULT_LANGUAGE = "English"
-DEFAULT_TRANSLATION_LANGUAGE = "English" # Default translation language
+DEFAULT_TRANSLATION_LANGUAGE = "English"
 
 # Predefined roles and their corresponding prompts and initial greetings
 roles = {
@@ -54,17 +54,18 @@ ai_greeting_sent = False
 current_language = DEFAULT_LANGUAGE
 current_translation_language = DEFAULT_TRANSLATION_LANGUAGE
 
+
 # Function to translate to selected language (Synchronous version)
 def translate_to_language(text, loop, language):
-    try:
-        dest_lang = 'en'  # Default Language
-        if language == "Japanese":
-            dest_lang = 'ja'
-        elif language == "Spanish":
-            dest_lang = "es"
-        elif language == "French":
-            dest_lang = "fr"
+    dest_lang = 'en'  # Default Language
+    if language == "Japanese":
+        dest_lang = 'ja'
+    elif language == "Spanish":
+        dest_lang = "es"
+    elif language == "French":
+        dest_lang = "fr"
 
+    try:
         translation = translator.translate(text, dest=dest_lang)
         if hasattr(translation, 'text'):
             return translation.text
@@ -78,8 +79,6 @@ def translate_to_language(text, loop, language):
 
 # Function to generate conversation with Google Gemini
 def generate_response(input_text, current_role, language):
-    global conversation_histories
-
     # Initialize conversation history for language and role if it doesn't exist
     if (language, current_role) not in conversation_histories:
         conversation_histories[(language, current_role)] = []
@@ -90,10 +89,7 @@ def generate_response(input_text, current_role, language):
     conversation_history.append(f"You: {input_text}")
 
     # Build the prompt with conversation history and role
-    if current_role:
-        prompt = roles[current_role]["prompt"].format(language=language) + "\n"
-    else:
-        prompt = ""
+    prompt = roles[current_role]["prompt"].format(language=language) + "\n" if current_role else ""
     prompt += "\n".join(conversation_history)
 
     try:
@@ -107,31 +103,28 @@ def generate_response(input_text, current_role, language):
         if len(conversation_history) > 20:
             conversation_history = conversation_history[-20:]
 
-        conversation_histories[(language, current_role)] = conversation_history  # Put back role specific history
-
         return ai_response
     except Exception as e:
         return f"Error generating response: {str(e)}"
 
 # Function to translate to English (Synchronous version)
 def translate_to_english(text, loop, language, translation_language):
-    try:
-        src_lang = 'en'
-        dest_lang = 'en' # Default translation language
-        if language == "Japanese":
-            src_lang = 'ja'
-        elif language == "Spanish":
-            src_lang = "es"
-        elif language == "French":
-            src_lang = "fr"
+    src_lang = 'en'
+    dest_lang = 'en' # Default translation language
+    if language == "Japanese":
+        src_lang = 'ja'
+    elif language == "Spanish":
+        src_lang = "es"
+    elif language == "French":
+        src_lang = "fr"
         
-        if translation_language == "Japanese":
+    if translation_language == "Japanese":
             dest_lang = 'ja'
-        elif translation_language == "Spanish":
-            dest_lang = "es"
-        elif translation_language == "French":
-            dest_lang = "fr"
-
+    elif translation_language == "Spanish":
+        dest_lang = "es"
+    elif translation_language == "French":
+        dest_lang = "fr"
+    try:
         translation = translator.translate(text, src=src_lang, dest=dest_lang)
 
         if hasattr(translation, 'text'):
@@ -161,7 +154,7 @@ def speak_response(text, language):
         print(f"Error in text to speech: {e}")
 
 class ChatApp:
-    def __init__(self, root, show_language_selection, initial_role, initial_language, initial_translation_language):
+    def __init__(self, root, show_language_selection, initial_role, initial_language=DEFAULT_LANGUAGE, initial_translation_language=DEFAULT_TRANSLATION_LANGUAGE):
         self.root = root
         self.root.title("Conversation Practice Bot")
         self.root.geometry("800x600")  # Set initial window size
@@ -169,7 +162,6 @@ class ChatApp:
         self.show_language_selection = show_language_selection
         self.language = initial_language  # The current language
         self.translation_language = initial_translation_language # The current translation language
-        self.initial_language = initial_language
         self.chat_displays = {}  # Store chat display for each language
         self.popup = None  # To store the popup window
         self.role_mapping = {} # Mapping of translated role to english role
@@ -289,7 +281,7 @@ class ChatApp:
         if current_role and not ai_greeting_sent:
             greeting = roles[current_role]["greeting"]
             translated_greeting = translate_to_language(greeting, self.loop, current_language)
-            tag = self.add_message(f"AI: {translated_greeting}")
+            self.add_message(f"AI: {translated_greeting}")
             conversation_histories[(current_language, current_role)] = [f"AI: {translated_greeting}"]
             last_ai_response = translated_greeting
             # speak_response(translated_greeting, current_language)
@@ -308,7 +300,7 @@ class ChatApp:
         if user_input:
             self.add_message(f"You: {user_input}")
             response = generate_response(user_input, current_role, current_language)  # Use self.language
-            tag = self.add_message(f"AI: {response}")
+            self.add_message(f"AI: {response}")
             global last_ai_response
             last_ai_response = response
             #speak_response(response, self.language)
@@ -382,7 +374,6 @@ class ChatApp:
         self.conversation_display.grid(row=0, column=0, columnspan=3, padx=10, pady=10)
         self.set_role(self.role_var.get(), new_language)
 
-
     def go_back_to_language_selection(self):
         self.root.destroy()  # Close the main chat window
         self.show_language_selection()  # Reopen the language selection window
@@ -399,7 +390,7 @@ class TranslationLanguageWindow:
             "window_title": "Select Translation Language",
         }
         self.root.title(self.ui_elements["window_title"])
-        self.root.geometry("300x200")  # Set the size for the language selection window
+        self.root.geometry("300x400")  # Set the size for the language selection window
 
         self.on_translation_language_selected = on_translation_language_selected
         self.root.configure(bg="#333333")  # Dark grey background
@@ -433,7 +424,7 @@ class LanguageSelectionWindow:
            "window_title": "Select Language"
         }
         self.root.title(translate_to_language(self.ui_elements["window_title"], asyncio.new_event_loop(), translation_language))
-        self.root.geometry("300x200")  # Set the size for the language selection window
+        self.root.geometry("300x400")  # Set the size for the language selection window
 
         self.on_language_selected = on_language_selected
         self.translation_language = translation_language
@@ -467,7 +458,7 @@ class RoleSelectionWindow:
            "window_title": "Select Role"
         }
         self.root.title(translate_to_language(self.ui_elements["window_title"], asyncio.new_event_loop(), translation_language))
-        self.root.geometry("300x200")  # Set size for the role selection window
+        self.root.geometry("300x400")  # Set size for the role selection window
 
         self.on_role_selected = on_role_selected
         self.language = language
@@ -503,7 +494,6 @@ def on_language_selected(language, lang_window_root, show_language_selection, tr
         role_root = tk.Tk()
         role_selection = RoleSelectionWindow(role_root, lambda role, role_window_root, language=language, translation_language=translation_language: on_role_selected(role, role_window_root, show_language_selection, language, translation_language), language, translation_language)
         role_root.mainloop()
-
 
 def on_role_selected(role, role_window_root, show_language_selection, language, translation_language):
     role_window_root.destroy()
