@@ -5,6 +5,7 @@ from gtts import gTTS
 import tkinter as tk
 from tkinter import font, scrolledtext, ttk
 import asyncio
+import re # Added to import regular expressions
 
 # Configure Google Gemini API
 genai.configure(api_key="AIzaSyAurbpVsBDTcNp7VxQ4b8DTBIWjq2_PekA")
@@ -314,30 +315,76 @@ class ChatApp:
       self.conversation_display.config(state=tk.DISABLED)
       self.conversation_display.see(tk.END)
       return tag
-    
+      
     def show_translation_popup(self, event, text, tag):
-        
         if self.popup and self.popup.winfo_exists():
-           self.popup.destroy()
-        
-        if "AI:" in text:
-          
-            text_to_translate = text[text.index("AI:")+4:]
-            translation = translate_to_english(text_to_translate, self.loop, self.language, self.translation_language)
+            self.popup.destroy()
 
-            if translation:
-                x = self.conversation_display.winfo_pointerx()
-                y = self.conversation_display.winfo_pointery()
-                
-                self.popup = tk.Toplevel(self.root)
-                self.popup.wm_overrideredirect(True)
-                self.popup.geometry(f"+{x+10}+{y+10}")
-                popup_label = tk.Label(self.popup, text=translation, bg="white", relief=tk.SOLID, borderwidth=1)
-                popup_label.pack()
-               
-                self.popup.bind("<Leave>", lambda event: self.hide_popup_after_delay(event)) #If the user moves off of the text, wait for 200ms and then close.
-                self.conversation_display.tag_bind(tag, "<Leave>", lambda event: self.hide_popup_after_delay(event))#If the user moves off of the text, wait for 200ms and then close.
+        if "AI:" in text:
             
+            text_to_translate, word_tag = self._get_hovered_word(event, text, tag) # Get the hovered word from a helper function
+            if text_to_translate:
+                phrase_to_translate = self._extract_phrase(text, text_to_translate) # Extract the phrase from text
+            
+                translation = translate_to_english(phrase_to_translate, self.loop, self.language, self.translation_language)
+
+                if translation:
+                    x = self.conversation_display.winfo_pointerx()
+                    y = self.conversation_display.winfo_pointery()
+                    
+                    self.popup = tk.Toplevel(self.root)
+                    self.popup.wm_overrideredirect(True)
+                    self.popup.geometry(f"+{x+10}+{y+10}")
+                    popup_label = tk.Label(self.popup, text=translation, bg="white", relief=tk.SOLID, borderwidth=1)
+                    popup_label.pack()
+                    
+                    self.popup.bind("<Leave>", lambda event: self.hide_popup_after_delay(event))
+                    self.conversation_display.tag_bind(word_tag, "<Leave>", lambda event: self.hide_popup_after_delay(event))
+
+    def _extract_phrase(self, text, word):
+       """
+        Helper function to extract the phrase containing the hovered word.
+        """
+       # Define phrase delimiters, such as periods, commas, colons, question marks, exclamation points.
+       delimiters = r'[.,:;?!]'
+
+       # Split the text by delimiters
+       phrases = re.split(delimiters, text)
+       
+       # Find the start and the end of the phrase
+       for phrase in phrases:
+         if word in phrase:
+            return phrase.strip()
+       
+       return ""  # return empty string if no phrase is found.
+
+    def _get_hovered_word(self, event, text, tag):
+        """
+        Helper function to determine the word under the mouse cursor in the text widget.
+        """
+
+        x = event.x
+        y = event.y
+        
+        #get the position of the mouse cursor in the text box and get the index
+        index = self.conversation_display.index(f"@{x},{y}")
+
+        #get the index of the start and end of the word
+        start = self.conversation_display.index(f"{index} wordstart")
+        end = self.conversation_display.index(f"{index} wordend")
+        
+        #get the word from the text box
+        word = self.conversation_display.get(start, end)
+        
+        #create a new tag for the word
+        word_tag = f"word_tag_{start}_{end}"
+        
+        #remove existing tag, and add a new tag to the word
+        self.conversation_display.tag_remove(word_tag, "1.0", "end")
+        self.conversation_display.tag_add(word_tag, start, end)
+        
+        return word, word_tag #return word and the tag
+                
     def hide_popup_after_delay(self, event):
         self.root.after(200, self.hide_popup)
 
