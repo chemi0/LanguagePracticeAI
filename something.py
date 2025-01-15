@@ -7,7 +7,7 @@ from tkinter import font, scrolledtext, ttk
 import asyncio
 
 # Configure Google Gemini API
-genai.configure(api_key="AIzaSyAurbpVsBDTcNp7VxQ4b8DTBIWjq2_PekA")
+genai.configure(api_key="AIzaSyAEWbuJJmqtoIXWQ-T7jCGV-lbO0WHD9EI") # Replace with your actual API key
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 # Translator for Japanese to English
@@ -53,7 +53,6 @@ last_ai_response = ""
 ai_greeting_sent = False
 current_language = DEFAULT_LANGUAGE
 current_translation_language = DEFAULT_TRANSLATION_LANGUAGE
-
 
 # Function to translate to selected language (Synchronous version)
 def translate_to_language(text, loop, language):
@@ -117,7 +116,7 @@ def translate_to_english(text, loop, language, translation_language):
         src_lang = "es"
     elif language == "French":
         src_lang = "fr"
-        
+
     if translation_language == "Japanese":
             dest_lang = 'ja'
     elif translation_language == "Spanish":
@@ -158,19 +157,18 @@ class ChatApp:
         self.root = root
         self.root.title("Conversation Practice Bot")
         self.root.geometry("800x600")  # Set initial window size
-        self.loop = asyncio.new_event_loop()  # Create the event loop once
+        self.loop = asyncio.get_event_loop()  # Get the event loop
         self.show_language_selection = show_language_selection
         self.AI_language = initial_language  # The current language
         self.translation_language = initial_translation_language # The current translation language
         self.chat_displays = {}  # Store chat display for each language
         self.popup = None  # To store the popup window
         self.role_mapping = {} # Mapping of translated role to english role
-        
+
         # UI Elements to Translate
         self.ui_elements = {
             "window_title": "Conversation Practice Bot",
             "send_button": "Send",
-            #"explain_button":"Explain", #Removed
             "settings_menu":"Settings"
         }
 
@@ -201,14 +199,10 @@ class ChatApp:
         self.send_button = ttk.Button(root, text=self.ui_elements["send_button"], command=self.send_message)
         self.send_button.grid(row=1, column=1, padx=5, pady=5)
 
-        # Explain Button # Removed
-        #self.explain_button = ttk.Button(root, text=self.ui_elements["explain_button"], command=self.explain_last_response)
-        #self.explain_button.grid(row=1, column=2, padx=5, pady=5)
-
         # Role Dropdown
         self.role_var = tk.StringVar(root)
         self.role_var.set(initial_role)  # Initial role selection
-        
+
         #Translate role options
         translated_roles = [translate_to_language(role, self.loop, initial_translation_language) for role in roles.keys()]
         self.role_dropdown = ttk.OptionMenu(root, self.role_var, translated_roles[0], *translated_roles,
@@ -222,19 +216,19 @@ class ChatApp:
         self.language_dropdown = ttk.OptionMenu(root, self.language_var, initial_language, *language_options,
                                                 command=self.change_language)
         self.language_dropdown.grid(row=3, column=0, columnspan=3, pady=5)
-        
+
          # Settings Menu
         self.create_settings_menu()
-        
+
         #Translate the UI
         self.translate_ui(initial_translation_language)
-        
+
         #Update the values of the dropdown menu
         self.update_role_dropdown(initial_translation_language)
 
         # Call set_role to display greeting of the default role
         self.set_role(initial_role, initial_language)
-        
+
     def create_settings_menu(self):
          menu_bar = tk.Menu(self.root)
          self.root.config(menu=menu_bar)
@@ -244,23 +238,22 @@ class ChatApp:
 
          language_menu = tk.Menu(settings_menu, tearoff=0)
          settings_menu.add_cascade(label="Change Translation Language", menu=language_menu)
-         
+
          language_options = ["English", "Japanese", "Spanish", "French"]
          for lang in language_options:
              language_menu.add_command(label=lang, command=lambda selected_lang=lang: self.change_translation_language(selected_lang))
-             
+
     def translate_ui(self, translation_language):
         self.root.title(translate_to_language(self.ui_elements["window_title"], self.loop, translation_language))
         self.send_button.config(text=translate_to_language(self.ui_elements["send_button"], self.loop, translation_language))
-        #self.explain_button.config(text=translate_to_language(self.ui_elements["explain_button"], self.loop, translation_language)) # Removed
-    
+
     def update_role_dropdown(self, translation_language):
          translated_roles = [translate_to_language(role, self.loop, translation_language) for role in roles.keys()]
          self.role_mapping = dict(zip(translated_roles, roles.keys())) # create the mapping of translated role to english role
          self.role_dropdown['menu'].delete(0, 'end')
          for role in translated_roles:
             self.role_dropdown['menu'].add_command(label=role, command=tk._setit(self.role_var, role, self.change_role))
-             
+
     def change_translation_language(self, new_translation_language):
        self.translation_language = new_translation_language
        self.translate_ui(new_translation_language)
@@ -268,7 +261,7 @@ class ChatApp:
 
     def set_role(self, role, language):
       global current_role, ai_greeting_sent, last_ai_response
-      
+
       if role in self.role_mapping: # If the selected role is the translated version, set the current role to the english version.
            current_role = self.role_mapping[role]
       else:
@@ -280,15 +273,13 @@ class ChatApp:
         if current_role and not ai_greeting_sent:
             greeting = roles[current_role]["greeting"]
             translated_greeting = translate_to_language(greeting, self.loop, language)
-            self.add_message(f"AI: {translated_greeting}")
+            self.add_ai_message(translated_greeting)
             conversation_histories[(language, current_role)] = [f"AI: {translated_greeting}"]
             last_ai_response = translated_greeting
-            # speak_response(translated_greeting, language)
             ai_greeting_sent = True
       else:  # Role is changed
-          for message in conversation_histories[(language, current_role)]:
-              self.add_message(message)
-    
+         conversation_histories[(language, current_role)] = []
+
     def clear_chat_display(self):
         self.conversation_display.config(state=tk.NORMAL)
         self.conversation_display.delete('1.0', tk.END)
@@ -299,44 +290,72 @@ class ChatApp:
         if user_input:
             self.add_message(f"You: {user_input}")
             response = generate_response(user_input, current_role, self.AI_language)  # Use self.language
-            self.add_message(f"AI: {response}")
-            global last_ai_response
-            last_ai_response = response
-            #speak_response(response, self.language)
+            self.add_ai_message(response)
             self.input_box.delete(0, tk.END)
 
     def add_message(self, message):
-      self.conversation_display.config(state=tk.NORMAL)
-      tag = f"tag_{self.conversation_display.index(tk.END).replace('.', '_')}"
-      self.conversation_display.insert(tk.END, message + "\n", tag)
-      self.conversation_display.tag_bind(tag, '<Motion>', lambda event, text=message: self.show_translation_popup(event, text, tag))
-      self.conversation_display.config(state=tk.DISABLED)
-      self.conversation_display.see(tk.END)
-      return tag
-    
+        self.conversation_display.config(state=tk.NORMAL)
+        self.conversation_display.insert(tk.END, message + "\n")
+        self.conversation_display.config(state=tk.DISABLED)
+        self.conversation_display.see(tk.END)
+
+    def add_ai_message(self, message):
+        self.conversation_display.config(state=tk.NORMAL)
+        ai_label_tag = f"ai_label_tag_{self.conversation_display.index(tk.END).replace('.', '_')}"
+        response_tag = f"response_tag_{self.conversation_display.index(tk.END).replace('.', '_')}"
+
+        # Insert "AI:" as a button
+        ai_button = tk.Button(self.conversation_display, text="AI:",
+                              command=lambda text=message: self.show_full_response(text),
+                              relief=tk.FLAT, borderwidth=0, background="#444444", foreground="lightblue",
+                              activebackground="#444444", activeforeground="lightblue",
+                              font=font.Font(family="Helvetica", size=12, weight="bold"))
+        self.conversation_display.window_create(tk.END, window=ai_button)
+        self.conversation_display.tag_add(ai_label_tag, tk.END + "-1c", tk.END)
+        self.conversation_display.tag_bind(ai_label_tag, "<Enter>", lambda event, text=f"AI: {message}", tag=ai_label_tag: self.show_translation_popup(event, text, tag))
+
+        # Insert the AI message
+        self.conversation_display.insert(tk.END, f"{message}\n", response_tag)
+
+        self.conversation_display.config(state=tk.DISABLED)
+        self.conversation_display.see(tk.END)
+
+    def show_full_response(self, response):
+        if self.popup and self.popup.winfo_exists():
+            self.popup.destroy()
+
+        self.popup = tk.Toplevel(self.root)
+        self.popup.title("Full Response")
+        self.popup.geometry("400x300")
+
+        text_area = scrolledtext.ScrolledText(self.popup, wrap=tk.WORD)
+        text_area.insert(tk.END, response)
+        text_area.config(state=tk.DISABLED)
+        text_area.pack(expand=True, fill="both", padx=10, pady=10)
+
     def show_translation_popup(self, event, text, tag):
-        
+
         if self.popup and self.popup.winfo_exists():
            self.popup.destroy()
-        
+
         if "AI:" in text:
-          
+
             text_to_translate = text[text.index("AI:")+4:]
             translation = translate_to_english(text_to_translate, self.loop, self.AI_language, self.translation_language)
 
             if translation:
                 x = self.conversation_display.winfo_pointerx()
                 y = self.conversation_display.winfo_pointery()
-                
+
                 self.popup = tk.Toplevel(self.root)
                 self.popup.wm_overrideredirect(True)
                 self.popup.geometry(f"+{x+10}+{y+10}")
                 popup_label = tk.Label(self.popup, text=translation, bg="white", relief=tk.SOLID, borderwidth=1)
                 popup_label.pack()
-               
+
                 self.popup.bind("<Leave>", lambda event: self.hide_popup_after_delay(event)) #If the user moves off of the text, wait for 200ms and then close.
                 self.conversation_display.tag_bind(tag, "<Leave>", lambda event: self.hide_popup_after_delay(event))#If the user moves off of the text, wait for 200ms and then close.
-            
+
     def hide_popup_after_delay(self, event):
         self.root.after(200, self.hide_popup)
 
@@ -344,17 +363,8 @@ class ChatApp:
         if self.popup and self.popup.winfo_exists():
             self.popup.destroy()
 
-    def explain_last_response(self):
-        pass #Removed
-       # global last_ai_response
-        #if last_ai_response:
-         #   translation = translate_to_english(last_ai_response, self.loop, self.AI_language, self.translation_language)
-         #   self.add_message(f"Translation: {translation}")
-        #else:
-         #   self.add_message("There's no AI response to translate yet.")
-
     def change_role(self, new_role):
-        self.set_role(new_role, self.AI_language)
+         self.set_role(new_role, self.AI_language)
 
     def change_language(self, new_language):
         global ai_greeting_sent
@@ -379,12 +389,13 @@ class ChatApp:
         self.show_language_selection()  # Reopen the language selection window
 
     def __del__(self):
-        self.loop.close()
-        
+        if hasattr(self, 'loop') and self.loop and not self.loop.is_closed():
+            self.loop.close()
+
 class TranslationLanguageWindow:
     def __init__(self, root, on_translation_language_selected):
         self.root = root
-        
+
          # UI Elements to Translate
         self.ui_elements = {
            "window_title": "Select Translation Language",
@@ -411,19 +422,19 @@ class TranslationLanguageWindow:
                                         command=lambda selected_lang=lang: self.select_translation_language(
                                             selected_lang))
             language_button.pack(pady=5)
-        
+
     def select_translation_language(self, language):
         self.on_translation_language_selected(language, self.root)
-        
+
 class LanguageSelectionWindow:
     def __init__(self, root, on_language_selected, translation_language):
         self.root = root
-        
+
          # UI Elements to Translate
         self.ui_elements = {
            "window_title": "Select Language"
         }
-        self.root.title(translate_to_language(self.ui_elements["window_title"], asyncio.new_event_loop(), translation_language))
+        self.root.title(translate_to_language(self.ui_elements["window_title"], asyncio.get_event_loop(), translation_language))
         self.root.geometry("300x400")  # Set the size for the language selection window
 
         self.on_language_selected = on_language_selected
@@ -445,19 +456,19 @@ class LanguageSelectionWindow:
              language_button = ttk.Button(root, text=lang,
                                      command=lambda selected_lang=lang: self.select_language(selected_lang))
              language_button.pack(pady=5)
-        
+
     def select_language(self, language):
          self.on_language_selected(language, self.root, self.translation_language)
 
 class RoleSelectionWindow:
     def __init__(self, root, on_role_selected, language, translation_language):
         self.root = root
-        
+
          # UI Elements to Translate
         self.ui_elements = {
            "window_title": "Select Role"
         }
-        self.root.title(translate_to_language(self.ui_elements["window_title"], asyncio.new_event_loop(), translation_language))
+        self.root.title(translate_to_language(self.ui_elements["window_title"], asyncio.get_event_loop(), translation_language))
         self.root.geometry("300x400")  # Set size for the role selection window
 
         self.on_role_selected = on_role_selected
@@ -473,22 +484,22 @@ class RoleSelectionWindow:
         style.map('TButton',
                       background=[('active', '#666666')],
                        foreground=[('active', 'white')])
-        
+
         # Buttons for selecting the roles
         for index, role_name in enumerate(roles.keys()):
                 button = ttk.Button(root, text=role_name,
                                 command=lambda role=role_name: self.select_role(role))
                 button.pack(pady=5)
-    
+
     def select_role(self, role):
             self.on_role_selected(role, self.root, self.language, self.translation_language)
-            
+
 def on_translation_language_selected(translation_language, translation_window_root, show_language_selection):
     translation_window_root.destroy()
     lang_root = tk.Tk()
     lang_selection = LanguageSelectionWindow(lang_root, lambda lang, lang_window_root, translation_language=translation_language: on_language_selected(lang, lang_window_root, show_language_selection, translation_language), translation_language)
     lang_root.mainloop()
-    
+
 def on_language_selected(language, lang_window_root, show_language_selection, translation_language):
         lang_window_root.destroy()
         role_root = tk.Tk()
@@ -507,5 +518,5 @@ if __name__ == "__main__":
        trans_root = tk.Tk()
        trans_selection = TranslationLanguageWindow(trans_root, lambda trans_lang, trans_window_root: on_translation_language_selected(trans_lang, trans_window_root, show_language_selection))
        trans_root.mainloop()
-       
+
     show_language_selection()

@@ -1,0 +1,24 @@
++2nd gemini/same gemini to translate/explain the sentence/words
++correct gramatical mistakes you made/vocabulary checker
++voice input/output/accent checking
+
+
++add useful personalities
+
+
+(1) hover over words for quick translation / clicking is more descriptive + tts
+for sentences it will be something like this : "Hello , my name is Connor. *" pressing the * would bring up a window with a scroll wheel with the translation of the sentence , split it into segments , each segment will have (1)
+-prompts
+-2nd gemini if the same one doesnt work properly (but it should)
+-hover/pressing events
+
+
+
+
+
+
+
+
+
+
+
