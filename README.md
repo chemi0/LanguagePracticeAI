@@ -1,2 +1,2 @@
-# -
-Language-learning helper 
+# - Sigmabot
+Language practice bot; Conversation practice;
