@@ -1,49 +1,13 @@
+# gui.py
+# Tkinter GUI classes and functions
 import tkinter as tk
 from tkinter import font, scrolledtext, ttk
 import asyncio
-import re
+import re # Added to import regular expressions
 
-from translation_utils import translate_to_language, translate_to_english
-from gemini_utils import generate_response
-from tts_utils import speak_response
-
-# Default Language and Default translation language
-DEFAULT_LANGUAGE = "English"
-DEFAULT_TRANSLATION_LANGUAGE = "English"
-
-# Predefined roles and their corresponding prompts and initial greetings
-roles = {
-    "Boss": {
-        "prompt": "I'm learning {language} and the best way is to learn is to have conversations in certain scenarios so lets pretend that you are my boss. Be direct and professional in your responses. Respond ONLY in {language}.",
-        "greeting": "Good morning. Do you need anything?"
-    },
-    "Best Friend": {
-        "prompt": "I'm learning {language} and the best way to learn is to have conversations in certain scenarios so lets pretend that you are my best friend. Be casual and friendly in your responses. Respond ONLY in {language}.",
-        "greeting": "Yo, how are you"
-    },
-    "Stranger": {
-        "prompt": "I'm learning {language} and the best way to learn is to have conversations in certain scenarios so lets pretend that you are a stranger. Respond neutrally but be polite. Respond ONLY in {language}.",
-        "greeting": "Hello. Can I help you?"
-    },
-    "Mother": {
-        "prompt": "I'm learning {language} and the best way to learn is to have conversations in certain scenarios so lets pretend that you are my mother. Be caring and supportive in your responses. Respond ONLY in {language}.",
-        "greeting": "Oh, how have you been?"
-    },
-    "Teacher": {
-        "prompt": "I'm learning {language} and the best way to learn is to have conversations in certain scenarios so lets pretend that you are my {language} teacher. Be educational and helpful. Respond ONLY in {language}.",
-        "greeting": "Hello. What will you study today?"
-    },
-    "Drunk Friend": {
-        "prompt": "I'm learning {language} and the best way to learn is to have conversations in certain scenarios so lets pretend that you are my drunk friend. Be very silly and use slang. Respond ONLY in {language}.",
-        "greeting": "Wow! How are you doing?"
-    }
-}
-
-current_role = ""
-last_ai_response = ""
-ai_greeting_sent = False
-current_language = DEFAULT_LANGUAGE
-current_translation_language = DEFAULT_TRANSLATION_LANGUAGE
+from translation_utils import translate_to_language, translate_to_english, speak_response
+from api_handler import generate_response
+from config import roles, DEFAULT_LANGUAGE, DEFAULT_TRANSLATION_LANGUAGE, conversation_histories, current_role, last_ai_response, ai_greeting_sent, current_language, current_translation_language
 
 
 class ChatApp:
@@ -63,7 +27,6 @@ class ChatApp:
         self.ui_elements = {
             "window_title": "Conversation Practice Bot",
             "send_button": "Send",
-            "explain_button":"Explain",
             "settings_menu":"Settings"
         }
 
@@ -82,7 +45,7 @@ class ChatApp:
         # Conversation Display
         self.conversation_display = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=80, height=20,
                                                             bg="#444444", fg="white", font=text_font)
-        self.conversation_display.grid(row=0, column=0, columnspan=3, padx=10, pady=10)
+        self.conversation_display.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
         self.conversation_display.config(state=tk.DISABLED)
         self.chat_displays[self.language] = self.conversation_display
 
@@ -94,10 +57,6 @@ class ChatApp:
         self.send_button = ttk.Button(root, text=self.ui_elements["send_button"], command=self.send_message)
         self.send_button.grid(row=1, column=1, padx=5, pady=5)
 
-        # Explain Button
-        self.explain_button = ttk.Button(root, text=self.ui_elements["explain_button"], command=self.explain_last_response)
-        self.explain_button.grid(row=1, column=2, padx=5, pady=5)
-
         # Role Dropdown
         self.role_var = tk.StringVar(root)
         self.role_var.set(initial_role)  # Initial role selection
@@ -106,7 +65,7 @@ class ChatApp:
         translated_roles = [translate_to_language(role, self.loop, initial_translation_language) for role in roles.keys()]
         self.role_dropdown = ttk.OptionMenu(root, self.role_var, translated_roles[0], *translated_roles,
                                             command=self.change_role)
-        self.role_dropdown.grid(row=2, column=0, columnspan=3, pady=5)
+        self.role_dropdown.grid(row=2, column=0, columnspan=2, pady=5)
 
         # Language Dropdown
         self.language_var = tk.StringVar(root)
@@ -114,7 +73,7 @@ class ChatApp:
         language_options = ["English", "Japanese", "Spanish", "French"]
         self.language_dropdown = ttk.OptionMenu(root, self.language_var, initial_language, *language_options,
                                                 command=self.change_language)
-        self.language_dropdown.grid(row=3, column=0, columnspan=3, pady=5)
+        self.language_dropdown.grid(row=3, column=0, columnspan=2, pady=5)
 
          # Settings Menu
         self.create_settings_menu()
@@ -145,7 +104,6 @@ class ChatApp:
     def translate_ui(self, translation_language):
         self.root.title(translate_to_language(self.ui_elements["window_title"], self.loop, translation_language))
         self.send_button.config(text=translate_to_language(self.ui_elements["send_button"], self.loop, translation_language))
-        self.explain_button.config(text=translate_to_language(self.ui_elements["explain_button"], self.loop, translation_language))
 
     def update_role_dropdown(self, translation_language):
          translated_roles = [translate_to_language(role, self.loop, translation_language) for role in roles.keys()]
@@ -170,21 +128,17 @@ class ChatApp:
       self.clear_chat_display()
       self.add_message(f"AI Role set to: {current_role}")
 
-      # Access conversation_histories from gemini_utils
-      from gemini_utils import conversation_histories
-
       if (current_language, current_role) not in conversation_histories:
         if current_role and not ai_greeting_sent:
             greeting = roles[current_role]["greeting"]
             translated_greeting = translate_to_language(greeting, self.loop, current_language)
-            self.add_message(f"AI: {translated_greeting}")
+            self.add_ai_message(translated_greeting)
             conversation_histories[(current_language, current_role)] = [f"AI: {translated_greeting}"]
             last_ai_response = translated_greeting
-            # speak_response(translated_greeting, current_language)
             ai_greeting_sent = True
       else:  # Role is changed
           for message in conversation_histories[(current_language, current_role)]:
-              self.add_message(message)
+              self.add_message(message, is_ai_message=("AI:" in message))
 
     def clear_chat_display(self):
         self.conversation_display.config(state=tk.NORMAL)
@@ -196,21 +150,40 @@ class ChatApp:
         if user_input:
             self.add_message(f"You: {user_input}")
             response = generate_response(user_input, current_role, current_language)  # Use self.language
-            self.add_message(f"AI: {response}")
+            self.add_ai_message(response)
             global last_ai_response
             last_ai_response = response
-            #speak_response(response, self.language)
             self.input_box.delete(0, tk.END)
 
-    def add_message(self, message):
+    def add_message(self, message, is_ai_message=False):
         self.conversation_display.config(state=tk.NORMAL)
         tag = f"tag_{self.conversation_display.index(tk.END).replace('.', '_')}"
         self.conversation_display.insert(tk.END, message + "\n", tag)
         self.conversation_display.tag_bind(tag, '<Motion>', lambda event, text=message: self.show_translation_popup(event, text, tag))
-        self.conversation_display.tag_bind(tag, '<Button-1>', lambda event, text=message: self.show_gemini_explanation_popup(event, text))
+        if is_ai_message:
+            self.conversation_display.tag_bind(tag, '<Button-1>', lambda event, text=message: self.show_gemini_explanation_popup(event, text))
         self.conversation_display.config(state=tk.DISABLED)
         self.conversation_display.see(tk.END)
         return tag
+
+    def add_ai_message(self, message):
+        self.conversation_display.config(state=tk.NORMAL)
+        ai_tag = f"ai_tag_{self.conversation_display.index(tk.END).replace('.', '_')}"
+        ai_label_tag = f"ai_label_tag_{self.conversation_display.index(tk.END).replace('.', '_')}"
+        full_message_tag = f"full_message_tag_{self.conversation_display.index(tk.END).replace('.', '_')}"
+
+        self.conversation_display.insert(tk.END, "AI: ", ai_label_tag)
+        self.conversation_display.tag_config(ai_label_tag, foreground="blue", font=("Helvetica", 12, "bold"))
+        self.conversation_display.tag_bind(ai_label_tag, '<Button-1>', lambda event, text=message: speak_response(text, self.language)) # Use self.language here
+        self.conversation_display.tag_bind(ai_label_tag, '<Enter>', lambda event: self.conversation_display.config(cursor="hand2"))
+        self.conversation_display.tag_bind(ai_label_tag, '<Leave>', lambda event: self.conversation_display.config(cursor=""))
+
+        self.conversation_display.insert(tk.END, message + "\n", full_message_tag)
+        self.conversation_display.tag_bind(full_message_tag, '<Motion>', lambda event, text=message: self.show_translation_popup(event, "AI: " + text, full_message_tag))
+        self.conversation_display.tag_bind(full_message_tag, '<Button-1>', lambda event, text=message: self.show_gemini_explanation_popup(event, "AI: " + text))
+
+        self.conversation_display.config(state=tk.DISABLED)
+        self.conversation_display.see(tk.END)
 
     def show_translation_popup(self, event, text, tag):
         if self.popup and self.popup.winfo_exists():
@@ -265,9 +238,8 @@ class ChatApp:
         word_definitions_area.config(state=tk.DISABLED)
 
         async def get_definitions():
-            from gemini_utils import model # Import model here as it is used inside the class method.
             try:
-                response = await self.loop.run_in_executor(None, model.generate_content, f"Define the following sentence: '{phrase}'")
+                response = await self.loop.run_in_executor(None, generate_response, f"Define the following sentence: '{phrase}'", "Teacher", "English") # Force to use english for definition.
                 phrase_def = response.text
             except Exception as e:
                 phrase_def = f"Error fetching phrase definition: {e}"
@@ -281,7 +253,7 @@ class ChatApp:
             definitions_text = ""
             for word in words:
                 try:
-                    response = await self.loop.run_in_executor(None, model.generate_content, f"Give a quick definition of the word '{word}'")
+                    response = await self.loop.run_in_executor(None, generate_response, f"Give a quick definition of the word '{word}'", "Teacher", "English") # Force to use english for definition.
                     definitions_text += f"{word}: {response.text}\n\n"
                 except Exception as e:
                     definitions_text += f"Error fetching definition for '{word}': {e}\n\n"
@@ -345,14 +317,6 @@ class ChatApp:
         if self.popup and self.popup.winfo_exists():
             self.popup.destroy()
 
-    def explain_last_response(self):
-        global last_ai_response
-        if last_ai_response:
-            translation = translate_to_english(last_ai_response, self.loop, self.language, self.translation_language)  # Use self.language
-            self.add_message(f"Translation: {translation}")
-        else:
-            self.add_message("There's no AI response to translate yet.")
-
     def change_role(self, new_role):
         self.set_role(new_role, self.language)
 
@@ -360,18 +324,19 @@ class ChatApp:
         global current_language, ai_greeting_sent
         ai_greeting_sent = False
         current_language = new_language
+        self.language = new_language # Update the instance variable
         if new_language not in self.chat_displays:
             # Create new display if not available
              new_display = scrolledtext.ScrolledText(self.root, wrap=tk.WORD, width=80, height=20,
                                                                 bg="#444444", fg="white",
                                                                 font=font.Font(family="Helvetica", size=12))
-             new_display.grid(row=0, column=0, columnspan=3, padx=10, pady=10)
+             new_display.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
              new_display.config(state=tk.DISABLED)
              self.chat_displays[new_language] = new_display
 
         self.conversation_display.grid_remove()
         self.conversation_display = self.chat_displays[new_language]
-        self.conversation_display.grid(row=0, column=0, columnspan=3, padx=10, pady=10)
+        self.conversation_display.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
         self.set_role(self.role_var.get(), new_language)
 
     def go_back_to_language_selection(self):
@@ -392,7 +357,7 @@ class TranslationLanguageWindow:
             "window_title": "Select Translation Language",
         }
         self.root.title(self.ui_elements["window_title"])
-        self.root.geometry("300x400")  # Set the size for the language selection window
+        self.root.geometry("250x180")  # Adjusted size
 
         self.on_translation_language_selected = on_translation_language_selected
         self.root.configure(bg="#333333")  # Dark grey background
@@ -412,7 +377,7 @@ class TranslationLanguageWindow:
             language_button = ttk.Button(root, text=lang,
                                         command=lambda selected_lang=lang: self.select_translation_language(
                                             selected_lang))
-            language_button.pack(pady=5)
+            language_button.pack(pady=5, padx=10) # Added padx for better spacing
 
     def select_translation_language(self, language):
         self.on_translation_language_selected(language, self.root)
@@ -427,7 +392,7 @@ class LanguageSelectionWindow:
            "window_title": "Select Language"
         }
         self.root.title(translate_to_language(self.ui_elements["window_title"], self.loop, translation_language))
-        self.root.geometry("300x400")  # Set the size for the language selection window
+        self.root.geometry("250x180")  # Adjusted size
 
         self.on_language_selected = on_language_selected
         self.translation_language = translation_language
@@ -447,7 +412,7 @@ class LanguageSelectionWindow:
         for lang in language_options:
              language_button = ttk.Button(root, text=lang,
                                      command=lambda selected_lang=lang: self.select_language(selected_lang))
-             language_button.pack(pady=5)
+             language_button.pack(pady=5, padx=10) # Added padx for better spacing
 
     def select_language(self, language):
          self.on_language_selected(language, self.root, self.translation_language, self.loop)
@@ -462,7 +427,7 @@ class RoleSelectionWindow:
            "window_title": "Select Role"
         }
         self.root.title(translate_to_language(self.ui_elements["window_title"], self.loop, translation_language))
-        self.root.geometry("300x400")  # Set size for the role selection window
+        self.root.geometry("250x300")  # Adjusted size
 
         self.on_role_selected = on_role_selected
         self.language = language
@@ -482,7 +447,7 @@ class RoleSelectionWindow:
         for index, role_name in enumerate(roles.keys()):
                 button = ttk.Button(root, text=role_name,
                                 command=lambda role=role_name: self.select_role(role))
-                button.pack(pady=5)
+                button.pack(pady=5, padx=10) # Added padx for better spacing
 
     def select_role(self, role):
             self.on_role_selected(role, self.root, self.language, self.translation_language, self.loop)

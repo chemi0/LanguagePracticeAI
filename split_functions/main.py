@@ -1,10 +1,8 @@
+# main.py
 import tkinter as tk
 import asyncio
-
-from ui_elements import ChatApp, LanguageSelectionWindow, RoleSelectionWindow, TranslationLanguageWindow, DEFAULT_LANGUAGE, DEFAULT_TRANSLATION_LANGUAGE, roles, current_role, last_ai_response, ai_greeting_sent, current_language, current_translation_language # Import UI classes and global variables
-from translation_utils import translate_to_language, translate_to_english # Import translation functions
-from tts_utils import speak_response # Import TTS function
-
+from gui import ChatApp, LanguageSelectionWindow, RoleSelectionWindow, TranslationLanguageWindow
+from translation_utils import translate_to_language
 
 def on_translation_language_selected(translation_language, translation_window_root, show_language_selection, loop):
     translation_window_root.destroy()
@@ -25,7 +23,7 @@ def on_role_selected(role, role_window_root, show_language_selection, language, 
     chat_root.mainloop()
 
 # Main App Loop
-def main():
+if __name__ == "__main__":
     loop = asyncio.get_event_loop() # Create the event loop here
 
     def show_language_selection(loop=loop):
@@ -34,6 +32,3 @@ def main():
        trans_root.mainloop()
 
     show_language_selection(loop)
-
-if __name__ == "__main__":
-    main()

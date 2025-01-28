@@ -1,6 +1,8 @@
-from googletrans import Translator
-
-translator = Translator()
+# translation_utils.py
+# Functions for translation and text-to-speech
+from config import translator
+from gtts import gTTS
+import os
 
 # Function to translate to selected language (Synchronous version)
 def translate_to_language(text, loop, language):
@@ -53,3 +55,19 @@ def translate_to_english(text, loop, language, translation_language):
                 return f"Translation Error: {str(e)}"
     except Exception as e:
         return f"Translation Error: {str(e)}"
+
+# Text-to-Speech
+def speak_response(text, language):
+    lang_code = 'en'
+    if language == "Japanese":
+        lang_code = 'ja'
+    elif language == "Spanish":
+        lang_code = 'es'
+    elif language == "French":
+        lang_code = "fr"
+    try:
+        tts = gTTS(text=text, lang=lang_code)
+        tts.save("response.mp3")
+        os.system("start response.mp3")
+    except Exception as e:
+        print(f"Error in text to speech: {e}")
