@@ -12,13 +12,11 @@ for sentences it will be something like this : "Hello , my name is Connor. *" pr
 -2nd gemini if the same one doesnt work properly (but it should)
 -hover/pressing events
 
+AIzaSyAEWbuJJmqtoIXWQ-T7jCGV-lbO0WHD9EI
 
 
-
-
-
-
-
-
-
-
+things to fix in testing:
+** the translation hover sometimes gets confused about the language for some reason;
+** the button for tts sometimes just disappears randomly while swapping languages?
+** the AI's greeting sometimes just disappears randomly while swapping languages/personalities?
+** translation seems to be working fine , tts speaks out just fine in the correct annoying tts accent for every language , the gemini explanation works just fine , but its a bit clunky for Japanese , look for alts
