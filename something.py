@@ -8,9 +8,10 @@ import asyncio
 import re
 import speech_recognition as sr # Import speech_recognition
 import threading # Import threading for voice recording
+import time # Import time - although not strictly needed in this version, keeping it as it was in side program
 
 # Configure Google Gemini API
-genai.configure(api_key="AIzaSyAurbpVsBDTcNp7VxQ4b8DTBIWjq2_PekA")
+genai.configure(api_key="AIzaSyAurbpVsBDTcNp7VxQ4b8DTBIWjq2_PekA") # Replace with your actual API key
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 # Translator for Japanese to English
@@ -34,7 +35,7 @@ roles = {
         "greeting": "Yo, how are you"
     },
     "Stranger": {
-        "prompt": "I'm learning {language} and the best way is to learn is to have conversations in certain scenarios so lets pretend that you are a stranger. Respond neutrally but be polite. Respond ONLY in {language}.",
+        "prompt": "I'm learning {language} and the best way to learn is to have conversations in certain scenarios so lets pretend that you are a stranger. Respond neutrally but be polite. Respond ONLY in {language}.",
         "greeting": "Hello. Can I help you?"
     },
     "Mother": {
@@ -56,6 +57,14 @@ last_ai_response = ""
 ai_greeting_sent = False
 current_language = DEFAULT_LANGUAGE
 current_translation_language = DEFAULT_TRANSLATION_LANGUAGE
+
+# --- Global Constants for Voice Input (from side program) ---
+BOT_NAME = "Gemini AI"
+USER_NAME = "You"
+RECORDING_TEXT = "Listening..."
+IDLE_TEXT = "Click 'Speak' and start talking..."
+SPEAK_BUTTON_TEXT = "Speak" # Although UI elements are translated, keeping these for internal logic
+STOP_BUTTON_TEXT = "Stop Speaking" # Although UI elements are translated, keeping these for internal logic
 
 # Function to translate to selected language (Synchronous version)
 def translate_to_language(text, loop, language):
@@ -178,8 +187,8 @@ class ChatApp:
             "window_title": "Conversation Practice Bot",
             "send_button": "Send",
             "settings_menu":"Settings",
-            "start_record_button": "Start Record",
-            "stop_record_button": "Stop Record"
+            "start_record_button": SPEAK_BUTTON_TEXT, # Using Constant from side program
+            "stop_record_button": STOP_BUTTON_TEXT # Using Constant from side program
         }
 
         # Configure Dark Theme
@@ -201,20 +210,24 @@ class ChatApp:
         self.conversation_display.config(state=tk.DISABLED)
         self.chat_displays[self.language] = self.conversation_display
 
+        # Status Label (for voice input feedback) - Added here, below conversation display
+        self.status_label = ttk.Label(root, text=IDLE_TEXT) # Using Constant from side program
+        self.status_label.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10) # Span columns, expand horizontally
+
         # User Input
         self.input_box = tk.Entry(root, width=70, bg="#555555", fg="white", insertbackground="white", font=text_font)
-        self.input_box.grid(row=1, column=0, padx=10, pady=5)
+        self.input_box.grid(row=2, column=0, padx=10, pady=5)
 
         # Send Button
         self.send_button = ttk.Button(root, text=self.ui_elements["send_button"], command=self.send_message)
-        self.send_button.grid(row=1, column=1, padx=5, pady=5)
+        self.send_button.grid(row=2, column=1, padx=5, pady=5)
 
-        # Voice Input Buttons
-        self.start_record_button = ttk.Button(root, text=self.ui_elements["start_record_button"], command=self.start_recording_func) # Changed command
-        self.start_record_button.grid(row=2, column=0, pady=5)
+        # Voice Input Buttons (renamed to Speak and Stop Speaking, using constants)
+        self.start_record_button = ttk.Button(root, text=translate_to_language(self.ui_elements["start_record_button"], self.loop, initial_translation_language), command=self.start_voice_input) # Changed command to new voice function
+        self.start_record_button.grid(row=3, column=0, pady=5)
 
-        self.stop_record_button = ttk.Button(root, text=self.ui_elements["stop_record_button"], command=self.stop_recording_func, state=tk.DISABLED) # Changed command
-        self.stop_record_button.grid(row=2, column=1, pady=5)
+        self.stop_record_button = ttk.Button(root, text=translate_to_language(self.ui_elements["stop_record_button"], self.loop, initial_translation_language), command=self.stop_voice_input, state=tk.DISABLED) # Changed command to new stop voice function, initially disabled
+        self.stop_record_button.grid(row=3, column=1, pady=5)
 
 
         # Role Dropdown
@@ -225,7 +238,7 @@ class ChatApp:
         translated_roles = [translate_to_language(role, self.loop, initial_translation_language) for role in roles.keys()]
         self.role_dropdown = ttk.OptionMenu(root, self.role_var, translated_roles[0], *translated_roles,
                                             command=self.change_role)
-        self.role_dropdown.grid(row=3, column=0, columnspan=2, pady=5)
+        self.role_dropdown.grid(row=4, column=0, columnspan=2, pady=5)
 
         # Language Dropdown
         self.language_var = tk.StringVar(root)
@@ -233,7 +246,7 @@ class ChatApp:
         language_options = ["English", "Japanese", "Spanish", "French"]
         self.language_dropdown = ttk.OptionMenu(root, self.language_var, initial_language, *language_options,
                                                 command=self.change_language)
-        self.language_dropdown.grid(row=4, column=0, columnspan=2, pady=5)
+        self.language_dropdown.grid(row=5, column=0, columnspan=2, pady=5)
 
          # Settings Menu
         self.create_settings_menu()
@@ -292,7 +305,7 @@ class ChatApp:
            current_role = role # If the selected role isn't translated use the english version.
       current_language = language
       self.clear_chat_display()
-      self.add_message(f"AI Role set to: {current_role}")
+      self.add_message("System", f"AI Role set to: {current_role}") # Call add_message here with "System" as sender
 
       if (current_language, current_role) not in conversation_histories:
         if current_role and not ai_greeting_sent:
@@ -315,88 +328,66 @@ class ChatApp:
         user_input = self.input_box.get().strip()
         print(f"send_message: Input text being sent: '{user_input}'") # DEBUG PRINT
         if user_input:
-            self.add_message(f"You: {user_input}")
+            self.add_message(USER_NAME, user_input) # Call add_message here for text input, using USER_NAME as sender
             response = generate_response(user_input, current_role, current_language)  # Use self.language
             self.add_ai_message(response)
             global last_ai_response
             last_ai_response = response
             self.input_box.delete(0, tk.END)
-            self.stop_recording() # Stop recording after sending a message (either voice or text)
+            self.stop_voice_input() # Stop voice input UI if active, after sending text message
 
-    def start_recording_func(self): # Renamed to start_recording_func
-        if not self.is_recording:
-            self.is_recording = True
-            self.conversation_display.config(state=tk.NORMAL)
-            self.conversation_display.insert(tk.END, "\nRecording voice input...\n")
-            self.conversation_display.config(state=tk.DISABLED)
-            self.conversation_display.see(tk.END)
-            self.input_box.config(state=tk.DISABLED)
-            self.send_button.config(state=tk.DISABLED)
-            self.start_record_button.config(state=tk.DISABLED)
-            self.stop_record_button.config(state=tk.NORMAL)
-            threading.Thread(target=self._record_audio).start() # Use threading directly
-
-    def _record_audio(self): # Keep _record_audio as threaded function
-        try:
-            with self.microphone as source:
-                self.recognizer.adjust_for_ambient_noise(source) # Adjust for noise
-                print("Recording...")
-                audio = self.recognizer.listen(source) # Record audio
-                self.recorded_audio = audio
-                print("Finished Recording")
-                self.root.after(0, self._transcribe_audio) # Schedule transcription on Tkinter thread
-        except Exception as e:
-            print(f"Error during recording: {e}")
-            self.is_recording = False
-            self.root.after(0, self.reset_voice_buttons_on_error) # Use root.after for UI update in error case
-
-    def reset_voice_buttons_on_error(self): # Helper function to reset buttons in case of error
-        self.start_button.config(state=tk.NORMAL)
-        self.stop_button.config(state=tk.DISABLED)
-        self.text_box.config(state=tk.DISABLED) # Disable textbox
-
-
-    def stop_recording_func(self): # Renamed to stop_recording_func
-        if self.is_recording:
-            self.is_recording = False
-            self.start_button.config(state=tk.NORMAL)
-            self.stop_button.config(state=tk.DISABLED)
-
-
-    def _transcribe_audio(self): # Keep _transcribe_audio as Tkinter thread function (using root.after)
-        if self.recorded_audio:
+    # --- Voice Input Functions (Integrated from side program) ---
+    def record_voice(self):
+        r = sr.Recognizer()
+        with sr.Microphone() as source:
+            self.status_label.config(text=RECORDING_TEXT) # Use global constant
+            r.adjust_for_ambient_noise(source)  # Adjust for noise
+            audio = r.listen(source) # Listen for audio
+            self.status_label.config(text=IDLE_TEXT) # Use global constant, change back to idle text
             try:
-                print("Transcribing...")
-                lang_code = self.get_speech_recognition_lang_code() # Get language code
-                user_input_voice = self.recognizer.recognize_google(self.recorded_audio, language=lang_code) # Pass language code
-                print("Transcription:", user_input_voice)
-                self.insert_voice_input_and_send(user_input_voice) # Call insert function
+                user_message = r.recognize_google(audio, language=self.get_speech_recognition_lang_code()) # Recognize speech using Google Speech Recognition, pass language code
+                self.add_message(USER_NAME, user_message) # Call general add_message for voice input now, using USER_NAME
+                self.process_voice_message(user_message) # Send message to Gemini and get response
             except sr.UnknownValueError:
-                self.conversation_display.config(state=tk.NORMAL)
-                self.conversation_display.insert(tk.END, "Google Speech Recognition could not understand audio\n")
-                self.conversation_display.config(state=tk.DISABLED)
-                self.conversation_display.see(tk.END)
+                self.add_message(BOT_NAME, "Could not understand audio") # Call general add_message for voice error, using BOT_NAME
             except sr.RequestError as e:
-                self.conversation_display.config(state=tk.NORMAL)
-                self.conversation_display.insert(tk.END, f"Could not request results from Google Speech Recognition service; {e}\n")
-                self.conversation_display.config(state=tk.DISABLED)
-                self.conversation_display.see(tk.END)
+                self.add_message(BOT_NAME, f"Could not request results from Speech Recognition service; {e}") # Call general add_message for voice error, using BOT_NAME
             finally:
-                self.recorded_audio = None # Clear recorded audio after transcription
+                self.stop_voice_input() # Stop voice input UI elements after recording
 
+    def process_voice_message(self, user_message):
+        try:
+            # Call generate_response here, passing user_message, current_role and current_language
+            response = generate_response(user_message, current_role, current_language)
+            bot_response = response # Response from generate_response is already just the text
+            self.add_ai_message(bot_response) # Use existing AI message adding function
+        except Exception as e:
+            self.add_message(BOT_NAME, f"Error communicating with Gemini: {e}") # Call general add_message for Gemini error, using BOT_NAME
 
-    def insert_voice_input_and_send(self, user_input_voice): # Keep insert_voice_input_and_send
-        print(f"insert_voice_input_and_send: Received voice input: '{user_input_voice}'")
-        # 1. Display voice input in the chat as "You: ..."
-        self.add_message(f"You: {user_input_voice}")
+    def add_message(self, sender, message): # Modified to be the general add_message function
+        self.conversation_display.config(state=tk.NORMAL) # Enable text area for editing
+        tag = sender.replace(" ", "_") # Create tag from sender name (for example "Gemini AI" becomes "Gemini_AI")
+        self.conversation_display.insert(tk.END, f"{sender}: {message}\n", tag) # Insert message with sender tag
+        self.conversation_display.tag_config(USER_NAME, foreground="blue") # Configure tag for user messages (same for voice and text)
+        self.conversation_display.tag_config(BOT_NAME, foreground="green") # Configure tag for bot messages (same for voice and text)
+        self.conversation_display.config(state=tk.DISABLED) # Disable text area from user editing
+        self.conversation_display.see(tk.END) # Scroll to the end of the text
 
-        # 2. Set input_box text for send_message to pick up
-        self.input_box.delete(0, tk.END)
-        self.input_box.insert(0, user_input_voice)
+    def start_voice_input(self):
+        self.start_record_button.config(state=tk.DISABLED) # Disable Speak button during recording
+        self.stop_record_button.config(state=tk.NORMAL) # Enable Stop button
+        self.input_box.config(state=tk.DISABLED) # Disable text input during voice recording
+        self.send_button.config(state=tk.DISABLED) # Disable send button during voice recording
+        threading.Thread(target=self.record_voice, daemon=True).start() # Start voice recording in new thread
 
-        # 3. Call send_message to trigger AI response
-        self.send_message() # Call send message to trigger response
-
+    def stop_voice_input(self):
+        self.start_record_button.config(state=tk.NORMAL) # Re-enable Speak button
+        self.stop_record_button.config(state=tk.DISABLED) # Disable Stop button
+        self.status_label.config(text=IDLE_TEXT) # Use global constant, reset status label
+        self.input_box.config(state=tk.NORMAL) # Re-enable text input after voice recording
+        self.send_button.config(state=tk.NORMAL) # Re-enable send button after voice recording
+        # In a more advanced implementation, you would actually stop the recording thread gracefully here.
+        # For this basic example, we rely on the speech recognition to naturally stop listening after a pause.
 
     def get_speech_recognition_lang_code(self):
         lang_code = 'en-US' # Default to english US
@@ -408,18 +399,7 @@ class ChatApp:
             lang_code = 'fr-FR'
         return lang_code
 
-    def add_message(self, message, is_ai_message=False):
-        self.conversation_display.config(state=tk.NORMAL)
-        tag = f"tag_{self.conversation_display.index(tk.END).replace('.', '_')}"
-        self.conversation_display.insert(tk.END, message + "\n", tag)
-        self.conversation_display.tag_bind(tag, '<Motion>', lambda event, text=message: self.show_translation_popup(event, text, tag))
-        if is_ai_message:
-            self.conversation_display.tag_bind(tag, '<Button-1>', lambda event, text=message: self.show_gemini_explanation_popup(event, text))
-        self.conversation_display.config(state=tk.DISABLED)
-        self.conversation_display.see(tk.END)
-        return tag
-
-    def add_ai_message(self, message):
+    def add_ai_message(self, message): # add_ai_message now only handles AI specific styling and function
         self.conversation_display.config(state=tk.NORMAL)
         ai_tag = f"ai_tag_{self.conversation_display.index(tk.END).replace('.', '_')}"
         ai_label_tag = f"ai_label_tag_{self.conversation_display.index(tk.END).replace('.', '_')}"
