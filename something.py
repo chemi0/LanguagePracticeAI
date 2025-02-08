@@ -9,6 +9,7 @@ import re
 import speech_recognition as sr # Import speech_recognition
 import threading # Import threading for voice recording
 import time # Import time - although not strictly needed in this version, keeping it as it was in side program
+import pygame # Import pygame for better audio control
 
 # Configure Google Gemini API
 genai.configure(api_key="AIzaSyAurbpVsBDTcNp7VxQ4b8DTBIWjq2_PekA") # Replace with your actual API key
@@ -65,6 +66,9 @@ RECORDING_TEXT = "Listening..."
 IDLE_TEXT = "Click 'Speak' and start talking..."
 SPEAK_BUTTON_TEXT = "Speak" # Although UI elements are translated, keeping these for internal logic
 STOP_BUTTON_TEXT = "Stop Speaking" # Although UI elements are translated, keeping these for internal logic
+STOP_TTS_BUTTON_TEXT = "Stop TTS" # New constant for Stop TTS button
+VOLUME_LABEL_TEXT = "Volume" # New constant for Volume Slider Label
+
 
 # Function to translate to selected language (Synchronous version)
 def translate_to_language(text, loop, language):
@@ -148,8 +152,8 @@ def translate_to_english(text, loop, language, translation_language):
     except Exception as e:
         return f"Translation Error: {str(e)}"
 
-# Text-to-Speech
-def speak_response(text, language):
+# Text-to-Speech function using pygame for non-blocking playback
+def speak_response(text, language, chat_app_instance): # Pass ChatApp instance
     lang_code = 'en'
     if language == "Japanese":
         lang_code = 'ja'
@@ -160,15 +164,29 @@ def speak_response(text, language):
     try:
         tts = gTTS(text=text, lang=lang_code)
         tts.save("response.mp3")
-        os.system("start response.mp3")
+
+        # Load sound and play in a new thread
+        sound = pygame.mixer.Sound("response.mp3")
+        current_volume = float(chat_app_instance.tts_volume.get())
+        sound.set_volume(current_volume) # Set volume here using instance variable
+        chat_app_instance.current_tts_sound = sound # Store sound object
+        chat_app_instance.root.after(0, chat_app_instance.enable_stop_tts_button) # Enable Stop TTS button
+        threading.Thread(target=lambda s=sound, instance=chat_app_instance: play_sound_non_blocking(s, instance), daemon=True).start() # Pass instance
+
     except Exception as e:
         print(f"Error in text to speech: {e}")
+
+def play_sound_non_blocking(sound, chat_app_instance): # Pass ChatApp instance
+    sound.play()
+    while pygame.mixer.get_busy(): # Wait until sound finishes playing
+        time.sleep(0.1)
+    chat_app_instance.root.after(0, chat_app_instance.disable_stop_tts_button) # Disable Stop TTS button after playback
 
 class ChatApp:
     def __init__(self, root, show_language_selection, initial_role, initial_language, initial_translation_language, loop):
         self.root = root
         self.root.title("Conversation Practice Bot")
-        self.root.geometry("800x650")  # Increased window height to accommodate voice buttons
+        self.root.geometry("800x750") # Increased height for volume slider
         self.loop = loop
         self.show_language_selection = show_language_selection
         self.language = initial_language  # The current language
@@ -180,6 +198,9 @@ class ChatApp:
         self.recognizer = sr.Recognizer()
         self.microphone = sr.Microphone()
         self.recorded_audio = None # To store recorded audio data
+        self.current_tts_sound = None # To store the currently playing sound object
+        self.tts_volume = tk.DoubleVar(value=0.5) # Initialize volume to 50%
+        pygame.mixer.init() # Initialize pygame mixer
 
 
         # UI Elements to Translate
@@ -188,7 +209,9 @@ class ChatApp:
             "send_button": "Send",
             "settings_menu":"Settings",
             "start_record_button": SPEAK_BUTTON_TEXT, # Using Constant from side program
-            "stop_record_button": STOP_BUTTON_TEXT # Using Constant from side program
+            "stop_record_button": STOP_BUTTON_TEXT, # Using Constant from side program
+            "stop_tts_button": STOP_TTS_BUTTON_TEXT, # New UI element for Stop TTS button
+            "volume_label": VOLUME_LABEL_TEXT # New UI element for Volume Slider Label
         }
 
         # Configure Dark Theme
@@ -229,6 +252,18 @@ class ChatApp:
         self.stop_record_button = ttk.Button(root, text=translate_to_language(self.ui_elements["stop_record_button"], self.loop, initial_translation_language), command=self.stop_voice_input, state=tk.DISABLED) # Changed command to new stop voice function, initially disabled
         self.stop_record_button.grid(row=3, column=1, pady=5)
 
+        # Stop TTS Button - added below voice input buttons
+        self.stop_tts_button = ttk.Button(root, text=translate_to_language(self.ui_elements["stop_tts_button"], self.loop, initial_translation_language), command=self.stop_tts) # New button for Stop TTS
+        self.stop_tts_button.grid(row=4, column=0, columnspan=2, pady=5) # Span columns
+        self.stop_tts_button.config(state=tk.DISABLED) # Initially disabled
+
+        # Volume Slider Label and Slider - Added below Stop TTS Button
+        self.volume_label = ttk.Label(root, text=translate_to_language(self.ui_elements["volume_label"], self.loop, initial_translation_language))
+        self.volume_label.grid(row=5, column=0, sticky="ew", padx=10) # Label on the left
+
+        self.volume_slider = tk.Scale(root, from_=0.0, to=1.0, orient=tk.HORIZONTAL, resolution=0.01, variable=self.tts_volume, command=self.change_tts_volume, bg="#444444", fg="white", highlightbackground="#444444") # Slider
+        self.volume_slider.grid(row=5, column=1, sticky="ew", padx=10) # Slider on the right, expanding horizontally
+
 
         # Role Dropdown
         self.role_var = tk.StringVar(root)
@@ -238,7 +273,7 @@ class ChatApp:
         translated_roles = [translate_to_language(role, self.loop, initial_translation_language) for role in roles.keys()]
         self.role_dropdown = ttk.OptionMenu(root, self.role_var, translated_roles[0], *translated_roles,
                                             command=self.change_role)
-        self.role_dropdown.grid(row=4, column=0, columnspan=2, pady=5)
+        self.role_dropdown.grid(row=6, column=0, columnspan=2, pady=5)
 
         # Language Dropdown
         self.language_var = tk.StringVar(root)
@@ -246,7 +281,7 @@ class ChatApp:
         language_options = ["English", "Japanese", "Spanish", "French"]
         self.language_dropdown = ttk.OptionMenu(root, self.language_var, initial_language, *language_options,
                                                 command=self.change_language)
-        self.language_dropdown.grid(row=5, column=0, columnspan=2, pady=5)
+        self.language_dropdown.grid(row=7, column=0, columnspan=2, pady=5)
 
          # Settings Menu
         self.create_settings_menu()
@@ -254,12 +289,38 @@ class ChatApp:
         #Translate the UI
         self.translate_ui(initial_translation_language)
         self.translate_voice_buttons(initial_translation_language)
+        self.translate_stop_tts_button(initial_translation_language) # Translate Stop TTS button
+        self.translate_volume_ui_elements(initial_translation_language) # Translate Volume UI elements
 
         #Update the values of the dropdown menu
         self.update_role_dropdown(initial_translation_language)
 
         # Call set_role to display greeting of the default role
         self.set_role(initial_role, initial_language)
+
+    def translate_volume_ui_elements(self, translation_language): # New translation function for Volume UI elements
+        self.volume_label.config(text=translate_to_language(self.ui_elements["volume_label"], self.loop, translation_language))
+
+    def change_tts_volume(self, new_volume_str): # New function to handle volume slider changes
+        try:
+            self.tts_volume.set(float(new_volume_str)) # Update tts_volume variable
+            print(f"TTS Volume changed to: {self.tts_volume.get()}") # Optional debug print
+        except ValueError:
+            print("Invalid volume value")
+
+    def translate_stop_tts_button(self, translation_language): # New translation function for Stop TTS button
+        self.stop_tts_button.config(text=translate_to_language(self.ui_elements["stop_tts_button"], self.loop, translation_language))
+
+    def enable_stop_tts_button(self): # Function to enable Stop TTS button - thread safe
+        self.stop_tts_button.config(state=tk.NORMAL)
+
+    def disable_stop_tts_button(self): # Function to disable Stop TTS button - thread safe
+        self.stop_tts_button.config(state=tk.DISABLED)
+
+    def stop_tts(self): # Stop TTS function
+        if self.current_tts_sound and pygame.mixer.get_busy():
+            pygame.mixer.stop()
+            self.disable_stop_tts_button() # Disable Stop TTS button after stopping
 
     def create_settings_menu(self):
          menu_bar = tk.Menu(self.root)
@@ -279,6 +340,8 @@ class ChatApp:
         self.root.title(translate_to_language(self.ui_elements["window_title"], self.loop, translation_language))
         self.send_button.config(text=translate_to_language(self.ui_elements["send_button"], self.loop, translation_language))
         self.translate_voice_buttons(translation_language)
+        self.translate_stop_tts_button(translation_language) # Translate Stop TTS button as well
+        self.translate_volume_ui_elements(translation_language) # Translate Volume UI elements
 
     def translate_voice_buttons(self, translation_language):
         self.start_record_button.config(text=translate_to_language(self.ui_elements["start_record_button"], self.loop, translation_language))
@@ -295,6 +358,8 @@ class ChatApp:
        self.translation_language = new_translation_language
        self.translate_ui(new_translation_language)
        self.update_role_dropdown(new_translation_language)
+       self.translate_stop_tts_button(new_translation_language) # Translate Stop TTS button on language change
+       self.translate_volume_ui_elements(new_translation_language) # Translate Volume UI elements on language change
 
     def set_role(self, role, language):
       global current_role, ai_greeting_sent, last_ai_response, current_language
@@ -335,6 +400,7 @@ class ChatApp:
             last_ai_response = response
             self.input_box.delete(0, tk.END)
             self.stop_voice_input() # Stop voice input UI if active, after sending text message
+            self.stop_tts() # Stop TTS if playing
 
     # --- Voice Input Functions (Integrated from side program) ---
     def record_voice(self):
@@ -354,6 +420,7 @@ class ChatApp:
                 self.add_message(BOT_NAME, f"Could not request results from Speech Recognition service; {e}") # Call general add_message for voice error, using BOT_NAME
             finally:
                 self.stop_voice_input() # Stop voice input UI elements after recording
+                self.stop_tts() # Stop TTS if playing
 
     def process_voice_message(self, user_message):
         try:
@@ -379,6 +446,7 @@ class ChatApp:
         self.input_box.config(state=tk.DISABLED) # Disable text input during voice recording
         self.send_button.config(state=tk.DISABLED) # Disable send button during voice recording
         threading.Thread(target=self.record_voice, daemon=True).start() # Start voice recording in new thread
+        self.stop_tts() # Stop TTS if it is currently playing when starting voice input
 
     def stop_voice_input(self):
         self.start_record_button.config(state=tk.NORMAL) # Re-enable Speak button
@@ -386,8 +454,6 @@ class ChatApp:
         self.status_label.config(text=IDLE_TEXT) # Use global constant, reset status label
         self.input_box.config(state=tk.NORMAL) # Re-enable text input after voice recording
         self.send_button.config(state=tk.NORMAL) # Re-enable send button after voice recording
-        # In a more advanced implementation, you would actually stop the recording thread gracefully here.
-        # For this basic example, we rely on the speech recognition to naturally stop listening after a pause.
 
     def get_speech_recognition_lang_code(self):
         lang_code = 'en-US' # Default to english US
@@ -407,7 +473,7 @@ class ChatApp:
 
         self.conversation_display.insert(tk.END, "AI: ", ai_label_tag)
         self.conversation_display.tag_config(ai_label_tag, foreground="blue", font=("Helvetica", 12, "bold"))
-        self.conversation_display.tag_bind(ai_label_tag, '<Button-1>', lambda event, text=message: speak_response(text, self.language)) # Use self.language here
+        self.conversation_display.tag_bind(ai_label_tag, '<Button-1>', lambda event, text=message: speak_response(text, self.language, self)) # Pass self (ChatApp instance) here
         self.conversation_display.tag_bind(ai_label_tag, '<Enter>', lambda event: self.conversation_display.config(cursor="hand2"))
         self.conversation_display.tag_bind(ai_label_tag, '<Leave>', lambda event: self.conversation_display.config(cursor=""))
 
@@ -578,6 +644,7 @@ class ChatApp:
 
     def __del__(self):
         if hasattr(self, 'loop') and self.loop.is_running():
+            pygame.mixer.quit() # Quit pygame mixer on exit
             self.loop.close()
 
 class TranslationLanguageWindow:
