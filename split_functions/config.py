@@ -3,9 +3,17 @@
 
 import google.generativeai as genai
 from googletrans import Translator
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Get Gemini API key from environment variables
+api_key = os.environ.get("GEMINI_API_KEY")
 
 # Configure Google Gemini API
-genai.configure(api_key="AIzaSyAurbpVsBDTcNp7VxQ4b8DTBIWjq2_PekA") # Replace with your actual API key or environment variable
+genai.configure(api_key=api_key) # Use the API key from environment variable
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 # Translator for Japanese to English
