@@ -565,7 +565,7 @@ class ChatApp:
 
         async def get_definitions():
             try:
-                response = await self.loop.run_in_executor(None, model.generate_content, f"Define the following sentence: '{phrase}' entirely in {self.translation_language} without {current_language}")
+                response = await self.loop.run_in_executor(None, model.generate_content, f"Define the following sentence: '{phrase}' as a translation from {current_language} to {self.translation_language} entirely in {self.translation_language} without {current_language}")
                 phrase_def = response.text
             except Exception as e:
                 phrase_def = f"Error fetching phrase definition: {e}"
@@ -579,7 +579,7 @@ class ChatApp:
             definitions_text = ""
             for word in words:
                 try:
-                    response = await self.loop.run_in_executor(None, model.generate_content, f"Give a quick definition of the word '{word}' entirely in {self.translation_language} without {current_language}")
+                    response = await self.loop.run_in_executor(None, model.generate_content, f"Give a quick definition of the word '{word}' in the context of '{phrase}'. Then translate the quick definition to {self.translation_language}")
                     definitions_text += f"{word}: {response.text}\n\n"
                 except Exception as e:
                     definitions_text += f"Error fetching definition for '{word}': {e}\n\n"
