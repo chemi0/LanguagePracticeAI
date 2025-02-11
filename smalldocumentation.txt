@@ -12,6 +12,16 @@ for sentences it will be something like this : "Hello , my name is Connor. *" pr
 -2nd gemini if the same one doesnt work properly (but it should)
 -hover/pressing events
 
+Bugs to fix :
+
+- TTS plays for the prompt message when you open the program without pressing it 
+- When you change from language to another language sometimes the prompt in the message box disappears
+- There was something else but I forgot to type it out and now I can't remember
+
+Additional :
+
+- Change from 10s of recording to button press - button press for a better user experience
+- This model is relatively slow , try the whisper v3 basic , this one should be faster but people say it tends to not describe correctly rarely
 
 
 

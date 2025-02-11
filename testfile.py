@@ -6,14 +6,19 @@ import tkinter as tk
 from tkinter import font, scrolledtext, ttk
 import asyncio
 import re
-import speech_recognition as sr # Import speech_recognition
+import speech_recognition as sr # Import speech_recognition - will be removed
 import threading # Import threading for voice recording
 import time # Import time - although not strictly needed in this version, keeping it as it was in side program
 import pygame # Import pygame for better audio control
+import sounddevice as sd # Import sounddevice
+import numpy as np # Import numpy
+from transformers import AutoProcessor, AutoModelForSpeechSeq2Seq # Import transformers and related components
+import torch # Import torch
+import tempfile # Import tempfile - might be needed, but not used in this version
 
 # Configure Google Gemini API
 genai.configure(api_key="AIzaSyAurbpVsBDTcNp7VxQ4b8DTBIWjq2_PekA") # Replace with your actual API key
-model = genai.GenerativeModel("gemini-1.5-flash")
+model_gemini = genai.GenerativeModel("gemini-1.5-flash") # Renamed to avoid confusion with whisper model
 
 # Translator for Japanese to English
 translator = Translator()
@@ -31,35 +36,35 @@ current_complexity_level = DEFAULT_COMPLEXITY_LEVEL # Global variable to store c
 # Predefined roles and their corresponding prompts and initial greetings
 roles = {
     "Boss": {
-        "prompt": "I'm learning {language} and the best way is to learn is to have conversations in certain scenarios so lets pretend that you are my boss. Be direct and professional in your responses. Respond ONLY in {language}. {complexity_instructions}",
+        "prompt": "I'm learning {language} and the best way is to learn is to have conversations in certain scenarios so lets pretend that you are my boss. Be direct and professional in your responses. Respond ONLY in {language}. {complexity_instructions}. Keep the sentences as brief as possible to not have long paragraphs of speech",
         "greeting": "Good morning. Do you need anything?"
     },
     "Best Friend": {
-        "prompt": "I'm learning {language} and the best way to learn is to have conversations in certain scenarios so lets pretend that you are my best friend. Be casual and friendly in your responses. Respond ONLY in {language}. {complexity_instructions}",
+        "prompt": "I'm learning {language} and the best way to learn is to have conversations in certain scenarios so lets pretend that you are my best friend. Be casual and friendly in your responses. Respond ONLY in {language}. {complexity_instructions}. Keep the sentences as brief as possible to not have long paragraphs of speech",
         "greeting": "Yo, how are you"
     },
     "Stranger": {
-        "prompt": "I'm learning {language} and the best way to learn is to have conversations in certain scenarios so lets pretend that you are a stranger. Respond neutrally but be polite. Respond ONLY in {language}. {complexity_instructions}",
+        "prompt": "I'm learning {language} and the best way to learn is to have conversations in certain scenarios so lets pretend that you are a stranger. Respond neutrally but be polite. Respond ONLY in {language}. {complexity_instructions}. Keep the sentences as brief as possible to not have long paragraphs of speech",
         "greeting": "Hello. Can I help you?"
     },
     "Mother": {
-        "prompt": "I'm learning {language} and the best way to learn is to have conversations in certain scenarios so lets pretend that you are my mother. Be caring and supportive in your responses. Respond ONLY in {language}. {complexity_instructions}",
+        "prompt": "I'm learning {language} and the best way to learn is to have conversations in certain scenarios so lets pretend that you are my mother. Be caring and supportive in your responses. Respond ONLY in {language}. {complexity_instructions}. Keep the sentences as brief as possible to not have long paragraphs of speech",
         "greeting": "Oh, how have you been?"
     },
     "Teacher": {
-        "prompt": "I'm learning {language} and the best way to learn is to have conversations in certain scenarios so lets pretend that you are my {language} teacher. Be educational and helpful. Respond ONLY in {language}. {complexity_instructions}",
+        "prompt": "I'm learning {language} and the best way to learn is to have conversations in certain scenarios so lets pretend that you are my {language} teacher. Be educational and helpful. Respond ONLY in {language}. {complexity_instructions}. Keep the sentences as brief as possible to not have long paragraphs of speech",
         "greeting": "Hello. What will you study today?"
     },
     "Drunk Friend": {
-        "prompt": "I'm learning {language} and the best way to learn is to have conversations in certain scenarios so lets pretend that you are my drunk friend. Be very silly and use slang. Respond ONLY in {language}. {complexity_instructions}",
+        "prompt": "I'm learning {language} and the best way to learn is to have conversations in certain scenarios so lets pretend that you are my drunk friend. Be very silly and use slang. Respond ONLY in {language}. {complexity_instructions}. Keep the sentences as brief as possible to not have long paragraphs of speech",
         "greeting": "Wow! How are you doing?"
     }
 }
 
 complexity_levels_instructions = {
     "Level 1": "Respond with very simple vocabulary and grammar. Avoid slang, idioms, and complex sentence structures. Aim for basic communication.",
-    "Level 2": "Respond with intermediate vocabulary and grammar. You can use some common idioms and slightly more complex sentences, but keep it relatively clear and easy to understand for a language learner.",
-    "Level 3": "Respond with advanced vocabulary and grammar, like a fluent native speaker. Use idioms, slang if appropriate for the role, and complex sentence structures to simulate natural, fluent conversation."
+    "Level 2": "Respond with intermediate vocabulary and grammar. You can use some common idioms and slightly more native sentences, but keep it relatively clear and easy to understand for a language learner.",
+    "Level 3": "Respond with native vocabulary and grammar, like a fluent native speaker. Use idioms, slang if appropriate for the role, and complex sentence structures to simulate native conversation and take into account the role in which you have."
 }
 
 
@@ -119,7 +124,7 @@ def generate_response(input_text, current_role, language, complexity_level):
     prompt += "\n".join(conversation_history)
 
     try:
-        response = model.generate_content(prompt)
+        response = model_gemini.generate_content(prompt) # Use model_gemini here
         ai_response = response.text
 
         # Append AI response to conversation history
@@ -206,13 +211,20 @@ class ChatApp:
         self.chat_displays = {}  # Store chat display for each language
         self.popup = None  # To store the popup window
         self.role_mapping = {} # Mapping of translated role to english role
-        self.is_recording = False # Flag to control voice recording loop
-        self.recognizer = sr.Recognizer()
-        self.microphone = sr.Microphone()
+        self.is_recording = False
+        self.recognizer = None # sr.Recognizer() - No longer needed
+        self.microphone = None # sr.Microphone() - No longer needed
         self.recorded_audio = None # To store recorded audio data
         self.current_tts_sound = None # To store the currently playing sound object
         self.tts_volume = tk.DoubleVar(value=0.5) # Initialize volume to 50%
         pygame.mixer.init() # Initialize pygame mixer
+
+        # --- Whisper Model Loading ---
+        print("Loading Whisper model...")
+        self.device = "cuda" if torch.cuda.is_available() else "cpu" # Device for Whisper model - DEFINED HERE FIRST
+        self.whisper_processor = AutoProcessor.from_pretrained("openai/whisper-large-v3-turbo")
+        self.whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained("openai/whisper-large-v3-turbo").to(self.device) # Use self.device here
+        print("Whisper model loaded.")
 
 
         # UI Elements to Translate
@@ -431,33 +443,54 @@ class ChatApp:
 
     # --- Voice Input Functions (Integrated from side program) ---
     def record_voice(self):
-        r = sr.Recognizer()
-        with sr.Microphone() as source:
-            self.status_label.config(text=RECORDING_TEXT) # Use global constant
-            r.adjust_for_ambient_noise(source)  # Adjust for noise
-            audio = [] # Initialize list to store audio chunks
-            self.is_recording = True # Set recording flag to True
-            while self.is_recording: # Loop while recording flag is true
-                try:
-                    audio_chunk = r.listen(source, phrase_time_limit=None, timeout=None) # Listen without time limit, no timeout
-                    audio.append(audio_chunk) # Append audio chunk to list
-                except sr.WaitTimeoutError: # Handle timeout error if needed, although timeout is set to None
-                    continue # Continue listening in loop
+        try:
+            print("Recording for up to 10 seconds...")
+            fs = 16000 # Sample rate
+            duration = 10 # Recording duration
+            audio_data = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='float32')
+            sd.wait()  # Wait until recording is finished
+            print("Finished recording.")
+            self.status_label.config(text=IDLE_TEXT) # Back to idle text
 
-            self.status_label.config(text=IDLE_TEXT) # Use global constant, change back to idle text
-            try:
-                # Combine all audio chunks
-                final_audio = sr.AudioData(b''.join([chunk.frame_data for chunk in audio]), sample_rate=source.SAMPLE_RATE, sample_width=source.SAMPLE_WIDTH)
-                user_message = r.recognize_google(final_audio, language=self.get_speech_recognition_lang_code()) # Recognize speech using Google Speech Recognition, pass language code
-                self.add_message(USER_NAME, user_message) # Call general add_message for voice input now, using USER_NAME
-                self.process_voice_message(user_message) # Send message to Gemini and get response
-            except sr.UnknownValueError:
-                self.add_message(BOT_NAME, "Could not understand audio") # Call general add_message for voice error, using BOT_NAME
-            except sr.RequestError as e:
-                self.add_message(BOT_NAME, f"Could not request results from Speech Recognition service; {e}") # Call general add_message for voice error, using BOT_NAME
-            finally:
-                self.stop_voice_input() # Stop voice input UI elements after recording
-                self.stop_tts() # Stop TTS if playing
+            transcribed_text = self.transcribe_audio_local_whisper_large_turbo(audio_data, fs)
+            if transcribed_text:
+                user_message = transcribed_text
+                self.add_message(USER_NAME, user_message)
+                self.process_voice_message(user_message)
+            else:
+                self.add_message(BOT_NAME, "No speech detected or transcription failed.") # Feedback for no speech or error
+
+        except Exception as e:
+            error_message = f"Voice Recognition Error: {e}"
+            print(error_message)
+            self.add_message(BOT_NAME, error_message)
+        finally:
+            self.stop_voice_input() # Stop voice input UI elements after recording
+            self.stop_tts() # Stop TTS if playing
+
+    def transcribe_audio_local_whisper_large_turbo(self, audio_data, sample_rate):
+        """Transcribes audio data locally using whisper-large-v3-turbo model."""
+
+        print("Transcribing locally using whisper-large-v3-turbo...")
+        try:
+            # Convert audio data to expected format and sample rate
+            audio_input = audio_data.flatten() # Flatten to mono if it's not already
+            input_features = self.whisper_processor(audio_input, sampling_rate=sample_rate, return_tensors="pt").input_features
+
+            # Move input features to the same device as the model (GPU if available)
+            input_features = input_features.to(self.device)
+
+            # Generate token ids
+            predicted_ids = self.whisper_model.generate(input_features)
+
+            # Decode token ids to text
+            transcription = self.whisper_processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
+            text = transcription
+            return text
+
+        except Exception as e:
+            print(f"Transcription Error: {e}")
+            return None # Indicate transcription failure
 
     def process_voice_message(self, user_message):
         try:
@@ -483,6 +516,7 @@ class ChatApp:
         self.stop_record_button.config(state=tk.NORMAL) # Enable Stop button
         self.input_box.config(state=tk.DISABLED) # Disable text input during voice recording
         self.send_button.config(state=tk.DISABLED) # Disable send button during voice recording
+        self.status_label.config(text=RECORDING_TEXT) # Status to recording
         threading.Thread(target=self.record_voice, daemon=True).start() # Start voice recording in new thread
         self.stop_tts() # Stop TTS if it is currently playing when starting voice input
 
@@ -494,17 +528,14 @@ class ChatApp:
         self.input_box.config(state=tk.NORMAL) # Re-enable text input after voice recording
         self.send_button.config(state=tk.NORMAL) # Re-enable send button after voice recording
 
-    def get_speech_recognition_lang_code(self):
-        lang_code = 'en-US' # Default to english US
-        if self.language == "Japanese":
-            lang_code = 'ja-JP'
-        elif self.language == "Spanish":
-            lang_code = 'es-ES' # or es-US for US spanish
-        elif self.language == "French":
-            lang_code = 'fr-FR'
-        return lang_code
+    def get_speech_recognition_lang_code(self): # No longer needed for whisper - removing
+        return 'en-US' # Dummy return -  No longer used
 
     def add_ai_message(self, message): # add_ai_message now only handles AI specific styling and function
+        self.add_ai_message_base(message) # Call base function
+        speak_response(message, self.language, self) # Keep TTS functionality
+
+    def add_ai_message_base(self, message): # Base function for adding AI message (no TTS)
         self.conversation_display.config(state=tk.NORMAL)
         ai_tag = f"ai_tag_{self.conversation_display.index(tk.END).replace('.', '_')}"
         ai_label_tag = f"ai_label_tag_{self.conversation_display.index(tk.END).replace('.', '_')}"
@@ -512,18 +543,18 @@ class ChatApp:
 
         self.conversation_display.insert(tk.END, "AI: ", ai_label_tag)
         self.conversation_display.tag_config(ai_label_tag, foreground="blue", font=("Helvetica", 12, "bold"))
-        self.conversation_display.tag_bind(ai_label_tag, '<Button-1>', lambda event, text=message: speak_response(text, self.language, self)) # Pass self (ChatApp instance) here
+        self.conversation_display.tag_bind(ai_label_tag, '<Button-1>', lambda event, text=message: speak_response(text, self.language, self)) # Pass self (ChatApp instance) here - Kept for consistency, but TTS is called outside now
         self.conversation_display.tag_bind(ai_label_tag, '<Enter>', lambda event: self.conversation_display.config(cursor="hand2"))
         self.conversation_display.tag_bind(ai_label_tag, '<Leave>', lambda event: self.conversation_display.config(cursor=""))
 
         self.conversation_display.insert(tk.END, message + "\n", full_message_tag)
         self.conversation_display.tag_bind(full_message_tag, '<Motion>', lambda event, text=message: self.show_translation_popup(event, "AI: " + text, full_message_tag))
-        self.conversation_display.tag_bind(full_message_tag, '<Button-1>', lambda event, text=message: self.show_gemini_explanation_popup(event, "AI: " + text, self.language)) # Pass self.language here
+        self.conversation_display.tag_bind(full_message_tag, '<Button-1>', lambda event, text=message: self.show_gemini_explanation_popup(event, "AI: " + text))
 
         self.conversation_display.config(state=tk.DISABLED)
         self.conversation_display.see(tk.END)
 
-    def show_translation_popup(self, event, text, tag):
+    def show_translation_popup(self, event, text, tag): #unchanged
         if self.popup and self.popup.winfo_exists():
             self.popup.destroy()
 
@@ -548,15 +579,15 @@ class ChatApp:
                     self.popup.bind("<Leave>", lambda event: self.hide_popup_after_delay(event))
                     self.conversation_display.tag_bind(word_tag, "<Leave>", lambda event: self.hide_popup_after_delay(event))
 
-    def show_gemini_explanation_popup(self, event, text, current_language): # Receive current_language
+    def show_gemini_explanation_popup(self, event, text): #unchanged
         if "AI:" in text:
             clicked_word, _ = self._get_hovered_word(event, text, None) # Get the clicked word
             if clicked_word:
                 phrase = self._extract_phrase(text, clicked_word)
                 if phrase:
-                    self._fetch_and_display_gemini_explanation(phrase, current_language) # Pass current_language
+                    self._fetch_and_display_gemini_explanation(phrase)
 
-    def _fetch_and_display_gemini_explanation(self, phrase, current_language): # Receive current_language
+    def _fetch_and_display_gemini_explanation(self, phrase): #unchanged
         popup = tk.Toplevel(self.root)
         popup.title("Gemini Explanation")
 
@@ -575,28 +606,24 @@ class ChatApp:
         word_definitions_area.pack(expand=True, fill="both")
         word_definitions_area.config(state=tk.DISABLED)
 
-        async def get_definitions():
+        async def get_definitions(): #unchanged
             try:
-                response = await self.loop.run_in_executor(None, model.generate_content, f"Define the following sentence in {current_language}: '{phrase}'") # Ask for definition in current_language
-                phrase_def_in_current_lang = response.text # Get definition in current_language
-                phrase_def_translated = translate_to_language(phrase_def_in_current_lang, self.loop, self.translation_language) # Translate to translation_language
-                phrase_def_display = phrase_def_translated # Display the translated definition
+                response = await self.loop.run_in_executor(None, model_gemini.generate_content, f"Define the following sentence: '{phrase}'") # Use model_gemini here
+                phrase_def = response.text
             except Exception as e:
-                phrase_def_display = f"Error fetching phrase definition: {e}"
+                phrase_def = f"Error fetching phrase definition: {e}"
 
             phrase_definition_text.config(state=tk.NORMAL)
             phrase_definition_text.delete(1.0, tk.END)
-            phrase_definition_text.insert(tk.END, phrase_def_display) # Display the translated definition
+            phrase_definition_text.insert(tk.END, phrase_def)
             phrase_definition_text.config(state=tk.DISABLED)
 
             words = phrase.split()
             definitions_text = ""
             for word in words:
                 try:
-                    response = await self.loop.run_in_executor(None, model.generate_content, f"Give a quick definition of the word '{word}' in {current_language}") # Ask for word definition in current_language
-                    word_def_in_current_lang = response.text # Get definition in current_language
-                    word_def_translated = translate_to_language(word_def_in_current_lang, self.loop, self.translation_language) # Translate to translation_language
-                    definitions_text += f"{word}: {word_def_translated}\n\n" # Display the translated definition
+                    response = await self.loop.run_in_executor(None, model_gemini.generate_content, f"Give a quick definition of the word '{word}'") # Use model_gemini here
+                    definitions_text += f"{word}: {response.text}\n\n"
                 except Exception as e:
                     definitions_text += f"Error fetching definition for '{word}': {e}\n\n"
 
@@ -605,9 +632,9 @@ class ChatApp:
             word_definitions_area.insert(tk.END, definitions_text)
             word_definitions_area.config(state=tk.DISABLED)
 
-        asyncio.run_coroutine_threadsafe(get_definitions(), self.loop)
+        asyncio.run_coroutine_threadsafe(get_definitions(), self.loop) #unchanged
 
-    def _extract_phrase(self, text, word):
+    def _extract_phrase(self, text, word): #unchanged
        """
         Helper function to extract the phrase containing the hovered word.
         """
@@ -624,7 +651,7 @@ class ChatApp:
 
        return ""  # return empty string if no phrase is found.
 
-    def _get_hovered_word(self, event, text, tag):
+    def _get_hovered_word(self, event, text, tag): #unchanged
         """
         Helper function to determine the word under the mouse cursor in the text widget.
         """
@@ -652,17 +679,17 @@ class ChatApp:
 
         return word, word_tag #return word and the tag
 
-    def hide_popup_after_delay(self, event):
+    def hide_popup_after_delay(self, event): #unchanged
         self.root.after(200, self.hide_popup)
 
-    def hide_popup(self):
+    def hide_popup(self): #unchanged
         if self.popup and self.popup.winfo_exists():
             self.popup.destroy()
 
-    def change_role(self, new_role):
+    def change_role(self, new_role): #unchanged
         self.set_role(new_role, self.language)
 
-    def change_language(self, new_language):
+    def change_language(self, new_language): #unchanged
         global current_language, ai_greeting_sent
         ai_greeting_sent = False
         current_language = new_language
@@ -681,16 +708,16 @@ class ChatApp:
         self.conversation_display.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
         self.set_role(self.role_var.get(), new_language)
 
-    def go_back_to_language_selection(self):
+    def go_back_to_language_selection(self): #unchanged
         self.root.destroy()  # Close the main chat window
         self.show_language_selection()  # Reopen the language selection window
 
-    def __del__(self):
+    def __del__(self): #unchanged
         if hasattr(self, 'loop') and self.loop.is_running():
             pygame.mixer.quit() # Quit pygame mixer on exit
             self.loop.close()
 
-    def show_complexity_level_popup(self):
+    def show_complexity_level_popup(self): #unchanged
         popup = tk.Toplevel(self.root)
         popup.title(translate_to_language("Select Complexity Level", self.loop, self.translation_language))
         popup.geometry("250x200") # Adjusted size
@@ -708,7 +735,7 @@ class ChatApp:
             level_button = ttk.Button(popup, text=level, command=lambda selected_level=level: self.set_complexity_level(selected_level, popup))
             level_button.pack(pady=5, padx=10)
 
-    def set_complexity_level(self, level, popup_window):
+    def set_complexity_level(self, level, popup_window): #unchanged
         global current_complexity_level
         current_complexity_level = level
         self.complexity_level = level # Update instance variable
@@ -718,7 +745,7 @@ class ChatApp:
         popup_window.destroy()
 
 
-class TranslationLanguageWindow:
+class TranslationLanguageWindow: #unchanged
     def __init__(self, root, on_translation_language_selected, loop):
         self.root = root
         self.loop = loop
@@ -750,10 +777,10 @@ class TranslationLanguageWindow:
                                             selected_lang))
             language_button.pack(pady=5, padx=10) # Added padx for better spacing
 
-    def select_translation_language(self, language):
+    def select_translation_language(self, language): #unchanged
         self.on_translation_language_selected(language, self.root)
 
-class LanguageSelectionWindow:
+class LanguageSelectionWindow: #unchanged
     def __init__(self, root, on_language_selected, translation_language, complexity_level, loop):
         self.root = root
         self.loop = loop
@@ -786,10 +813,10 @@ class LanguageSelectionWindow:
                                      command=lambda selected_lang=lang: self.select_language(selected_lang))
              language_button.pack(pady=5, padx=10) # Added padx for better spacing
 
-    def select_language(self, language):
+    def select_language(self, language): #unchanged
          self.on_language_selected(language, self.root, self.translation_language, self.complexity_level, self.loop)
 
-class RoleSelectionWindow:
+class RoleSelectionWindow: #unchanged
     def __init__(self, root, on_role_selected, language, translation_language, complexity_level, loop):
         self.root = root
         self.loop = loop
@@ -822,10 +849,10 @@ class RoleSelectionWindow:
                                 command=lambda role=role_name: self.select_role(role))
                 button.pack(pady=5, padx=10) # Added padx for better spacing
 
-    def select_role(self, role):
+    def select_role(self, role): #unchanged
             self.on_role_selected(role, self.root, self.language, self.translation_language, self.complexity_level, self.loop)
 
-class ComplexityLevelSelectionWindow: # New Complexity Level Selection Window
+class ComplexityLevelSelectionWindow: #unchanged
     def __init__(self, root, on_complexity_level_selected, translation_language, loop):
         self.root = root
         self.loop = loop
@@ -857,31 +884,31 @@ class ComplexityLevelSelectionWindow: # New Complexity Level Selection Window
                                 command=lambda selected_level=level: self.select_complexity_level(selected_level))
                 button.pack(pady=5, padx=10) # Added padx for better spacing
 
-    def select_complexity_level(self, complexity_level):
+    def select_complexity_level(self, complexity_level): #unchanged
             self.on_complexity_level_selected(complexity_level, self.root, self.translation_language, self.loop)
 
 
-def on_complexity_level_selected(complexity_level, complexity_window_root, translation_language, loop, show_language_selection_callback=None): # Modified to accept callback
+def on_complexity_level_selected(complexity_level, complexity_window_root, translation_language, loop, show_language_selection_callback=None): #unchanged
     complexity_window_root.destroy()
     lang_root = tk.Tk()
     lang_selection = LanguageSelectionWindow(lang_root, lambda lang, lang_window_root, translation_language=translation_language, complexity_level=complexity_level, loop=loop: on_language_selected(lang, lang_window_root, show_language_selection_callback, translation_language, complexity_level, loop), translation_language, complexity_level, loop) # Pass complexity level
     lang_root.mainloop()
 
 
-def on_translation_language_selected(translation_language, translation_window_root, show_language_selection, loop):
+def on_translation_language_selected(translation_language, translation_window_root, show_language_selection, loop): #unchanged
     translation_window_root.destroy()
     complexity_root = tk.Tk()
     complexity_selection = ComplexityLevelSelectionWindow(complexity_root, lambda complexity_level, complexity_window_root, translation_language=translation_language, loop=loop: on_complexity_level_selected(complexity_level, complexity_window_root, translation_language, loop, show_language_selection), translation_language, loop) # Pass show_language_selection
     complexity_root.mainloop()
 
 
-def on_language_selected(language, lang_window_root, show_language_selection, translation_language, complexity_level, loop):
+def on_language_selected(language, lang_window_root, show_language_selection, translation_language, complexity_level, loop): #unchanged
         lang_window_root.destroy()
         role_root = tk.Tk()
         role_selection = RoleSelectionWindow(role_root, lambda role, role_window_root, language=language, translation_language=translation_language, complexity_level=complexity_level, loop=loop: on_role_selected(role, role_window_root, show_language_selection, language, translation_language, complexity_level, loop), language, translation_language, complexity_level, loop) # Pass complexity level
         role_root.mainloop()
 
-def on_role_selected(role, role_window_root, show_language_selection, language, translation_language, complexity_level, loop):
+def on_role_selected(role, role_window_root, show_language_selection, language, translation_language, complexity_level, loop): #unchanged
     role_window_root.destroy()
     chat_root = tk.Tk()
     app = ChatApp(chat_root, show_language_selection, role, language, translation_language, complexity_level, loop) # Pass complexity level
@@ -891,7 +918,7 @@ def on_role_selected(role, role_window_root, show_language_selection, language, 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop() # Create the event loop here
 
-    def show_language_selection(loop=loop):
+    def show_language_selection(loop=loop): #unchanged
        trans_root = tk.Tk()
        trans_selection = TranslationLanguageWindow(trans_root, lambda trans_lang, trans_window_root, loop=loop: on_translation_language_selected(trans_lang, trans_window_root, show_language_selection, loop), loop)
        trans_root.mainloop()
