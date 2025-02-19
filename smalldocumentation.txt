@@ -22,6 +22,8 @@ Additional :
 
 - Change from 10s of recording to button press - button press for a better user experience
 - This model is relatively slow , try the whisper v3 basic , this one should be faster but people say it tends to not describe correctly rarely
+- (not immediate feature) allow editing of previous messages and creating conversation branches of those edited messages
+- clear chat button
 
 
 

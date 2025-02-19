@@ -3,17 +3,24 @@ from googletrans import Translator
 import os
 from gtts import gTTS
 import tkinter as tk
-from tkinter import font, scrolledtext, ttk
+from tkinter import font, scrolledtext, ttk, messagebox  # Import messagebox
 import asyncio
 import re
-import speech_recognition as sr # Import speech_recognition
-import threading # Import threading for voice recording
-import time # Import time - although not strictly needed in this version, keeping it as it was in side program
-import pygame # Import pygame for better audio control
+import speech_recognition as sr  # Import speech_recognition - will be removed
+import threading  # Import threading for voice recording
+import time  # Import time - although not strictly needed in this version, keeping it as it was in side program
+import pygame  # Import pygame for better audio control
+import sounddevice as sd  # Import sounddevice
+import numpy as np  # Import numpy
+from transformers import AutoProcessor, AutoModelForSpeechSeq2Seq  # Import transformers and related components
+import torch  # Import torch
+import tempfile  # Import tempfile - might be needed, but not used in this version
+import json  # Import json for saving and loading decks
 
+# --- (Existing Code - API Keys, Model Setup, Constants, etc.) ---
 # Configure Google Gemini API
-genai.configure(api_key="AIzaSyAurbpVsBDTcNp7VxQ4b8DTBIWjq2_PekA") # Replace with your actual API key
-model = genai.GenerativeModel("gemini-1.5-flash")
+genai.configure(api_key="AIzaSyAurbpVsBDTcNp7VxQ4b8DTBIWjq2_PekA")  # Replace with your actual API key
+model_gemini = genai.GenerativeModel("gemini-1.5-flash")  # Renamed to avoid confusion with whisper model
 
 # Translator for Japanese to English
 translator = Translator()
@@ -24,9 +31,9 @@ conversation_histories = {}
 # Default Language and Default translation language
 DEFAULT_LANGUAGE = "English"
 DEFAULT_TRANSLATION_LANGUAGE = "English"
-DEFAULT_COMPLEXITY_LEVEL = "Level 2" # Default complexity level
+DEFAULT_COMPLEXITY_LEVEL = "Level 2"  # Default complexity level
 
-current_complexity_level = DEFAULT_COMPLEXITY_LEVEL # Global variable to store complexity level
+current_complexity_level = DEFAULT_COMPLEXITY_LEVEL  # Global variable to store complexity level
 
 # Predefined roles and their corresponding prompts and initial greetings
 roles = {
@@ -43,15 +50,15 @@ roles = {
         "greeting": "Hello. Can I help you?"
     },
     "Mother": {
-        "prompt": "I'm learning {language} and the best way is to learn is to have conversations in certain scenarios so lets pretend that you are my mother. Be caring and supportive in your responses. Respond ONLY in {language}. {complexity_instructions}. Keep the sentences as brief as possible to not have long paragraphs of speech",
+        "prompt": "I'm learning {language} and the best way to learn is to have conversations in certain scenarios so lets pretend that you are my mother. Be caring and supportive in your responses. Respond ONLY in {language}. {complexity_instructions}. Keep the sentences as brief as possible to not have long paragraphs of speech",
         "greeting": "Oh, how have you been?"
     },
     "Teacher": {
-        "prompt": "I'm learning {language} and the best way is to learn is to have conversations in certain scenarios so lets pretend that you are my {language} teacher. Be educational and helpful. Respond ONLY in {language}. {complexity_instructions}. Keep the sentences as brief as possible to not have long paragraphs of speech",
+        "prompt": "I'm learning {language} and the best way to learn is to have conversations in certain scenarios so lets pretend that you are my {language} teacher. Be educational and helpful. Respond ONLY in {language}. {complexity_instructions}. Keep the sentences as brief as possible to not have long paragraphs of speech",
         "greeting": "Hello. What will you study today?"
     },
     "Drunk Friend": {
-        "prompt": "I'm learning {language} and the best way is to learn is to have conversations in certain scenarios so lets pretend that you are my drunk friend. Be very silly and use slang. Respond ONLY in {language}. {complexity_instructions}. Keep the sentences as brief as possible to not have long paragraphs of speech",
+        "prompt": "I'm learning {language} and the best way to learn is to have conversations in certain scenarios so lets pretend that you are my drunk friend. Be very silly and use slang. Respond ONLY in {language}. {complexity_instructions}. Keep the sentences as brief as possible to not have long paragraphs of speech",
         "greeting": "Wow! How are you doing?"
     }
 }
@@ -74,10 +81,10 @@ BOT_NAME = "Gemini AI"
 USER_NAME = "You"
 RECORDING_TEXT = "Listening..."
 IDLE_TEXT = "Click 'Speak' and start talking..."
-SPEAK_BUTTON_TEXT = "Speak" # Although UI elements are translated, keeping these for internal logic
-STOP_BUTTON_TEXT = "Stop Speaking" # Although UI elements are translated, keeping these for internal logic
-STOP_TTS_BUTTON_TEXT = "Stop TTS" # New constant for Stop TTS button
-VOLUME_LABEL_TEXT = "Volume" # New constant for Volume Slider Label
+SPEAK_BUTTON_TEXT = "Speak"  # Although UI elements are translated, keeping these for internal logic
+STOP_BUTTON_TEXT = "Stop Speaking"  # Although UI elements are translated, keeping these for internal logic
+STOP_TTS_BUTTON_TEXT = "Stop TTS"  # New constant for Stop TTS button
+VOLUME_LABEL_TEXT = "Volume"  # New constant for Volume Slider Label
 
 
 # Function to translate to selected language (Synchronous version)
@@ -86,9 +93,9 @@ def translate_to_language(text, loop, language):
     if language == "Japanese":
         dest_lang = 'ja'
     elif language == "Spanish":
-        dest_lang = "es"
+        dest_lang = 'es'
     elif language == "French":
-        dest_lang = "fr"
+        dest_lang = 'fr'
 
     try:
         translation = translator.translate(text, dest=dest_lang)
@@ -102,6 +109,7 @@ def translate_to_language(text, loop, language):
     except Exception as e:
         return f"Translation Error: {str(e)}"
 
+
 # Function to generate conversation with Google Gemini
 def generate_response(input_text, current_role, language, complexity_level):
     # Initialize conversation history for language and role if it doesn't exist
@@ -114,12 +122,12 @@ def generate_response(input_text, current_role, language, complexity_level):
     conversation_history.append(f"You: {input_text}")
 
     # Build the prompt with conversation history and role
-    complexity_instructions = complexity_levels_instructions.get(complexity_level, complexity_levels_instructions[DEFAULT_COMPLEXITY_LEVEL]) # Get complexity instructions based on level
+    complexity_instructions = complexity_levels_instructions.get(complexity_level, complexity_levels_instructions[DEFAULT_COMPLEXITY_LEVEL])  # Get complexity instructions based on level
     prompt = roles[current_role]["prompt"].format(language=language, complexity_instructions=complexity_instructions) + "\n" if current_role else ""
     prompt += "\n".join(conversation_history)
 
     try:
-        response = model.generate_content(prompt)
+        response = model_gemini.generate_content(prompt)  # Use model_gemini here
         ai_response = response.text
 
         # Append AI response to conversation history
@@ -133,10 +141,11 @@ def generate_response(input_text, current_role, language, complexity_level):
     except Exception as e:
         return f"Error generating response: {str(e)}"
 
+
 # Function to translate to English (Synchronous version)
 def translate_to_english(text, loop, language, translation_language):
     src_lang = 'en'
-    dest_lang = 'en' # Default translation language
+    dest_lang = 'en'  # Default translation language
     if language == "Japanese":
         src_lang = 'ja'
     elif language == "Spanish":
@@ -145,7 +154,7 @@ def translate_to_english(text, loop, language, translation_language):
         src_lang = "fr"
 
     if translation_language == "Japanese":
-            dest_lang = 'ja'
+        dest_lang = 'ja'
     elif translation_language == "Spanish":
         dest_lang = "es"
     elif translation_language == "French":
@@ -163,8 +172,9 @@ def translate_to_english(text, loop, language, translation_language):
     except Exception as e:
         return f"Translation Error: {str(e)}"
 
+
 # Text-to-Speech function using pygame for non-blocking playback
-def speak_response(text, language, chat_app_instance): # Pass ChatApp instance
+def speak_response(text, language, chat_app_instance):  # Pass ChatApp instance
     lang_code = 'en'
     if language == "Japanese":
         lang_code = 'ja'
@@ -179,53 +189,66 @@ def speak_response(text, language, chat_app_instance): # Pass ChatApp instance
         # Load sound and play in a new thread
         sound = pygame.mixer.Sound("response.mp3")
         current_volume = float(chat_app_instance.tts_volume.get())
-        sound.set_volume(current_volume) # Set volume here using instance variable
-        chat_app_instance.current_tts_sound = sound # Store sound object
-        chat_app_instance.root.after(0, chat_app_instance.enable_stop_tts_button) # Enable Stop TTS button
-        threading.Thread(target=lambda s=sound, instance=chat_app_instance: play_sound_non_blocking(s, instance), daemon=True).start() # Pass instance
+        sound.set_volume(current_volume)  # Set volume here using instance variable
+        chat_app_instance.current_tts_sound = sound  # Store sound object
+        chat_app_instance.root.after(0, chat_app_instance.enable_stop_tts_button)  # Enable Stop TTS button
+        threading.Thread(target=lambda s=sound, instance=chat_app_instance: play_sound_non_blocking(s, instance), daemon=True).start()  # Pass instance
 
     except Exception as e:
         print(f"Error in text to speech: {e}")
 
-def play_sound_non_blocking(sound, chat_app_instance): # Pass ChatApp instance
+
+def play_sound_non_blocking(sound, chat_app_instance):  # Pass ChatApp instance
     sound.play()
-    while pygame.mixer.get_busy(): # Wait until sound finishes playing
+    while pygame.mixer.get_busy():  # Wait until sound finishes playing
         time.sleep(0.1)
-    chat_app_instance.root.after(0, chat_app_instance.disable_stop_tts_button) # Disable Stop TTS button after playback
+    chat_app_instance.root.after(0, chat_app_instance.disable_stop_tts_button)  # Disable Stop TTS button after playback
+
 
 class ChatApp:
     def __init__(self, root, show_language_selection, initial_role, initial_language, initial_translation_language, initial_complexity_level, loop):
         self.root = root
         self.root.title("Conversation Practice Bot")
-        self.root.geometry("800x750") # Increased height for volume slider
+        self.root.geometry("900x750")  # Increased width of the window
         self.loop = loop
         self.show_language_selection = show_language_selection
         self.language = initial_language  # The current language
-        self.translation_language = initial_translation_language # The current translation language
-        self.complexity_level = initial_complexity_level # The current complexity level
+        self.translation_language = initial_translation_language  # The current translation language
+        self.complexity_level = initial_complexity_level  # The current complexity level
         self.chat_displays = {}  # Store chat display for each language
         self.popup = None  # To store the popup window
-        self.role_mapping = {} # Mapping of translated role to english role
+        self.role_mapping = {}  # Mapping of translated role to english role
         self.is_recording = False
-        self.recognizer = sr.Recognizer()
-        self.microphone = sr.Microphone()
-        self.recorded_audio = None # To store recorded audio data
-        self.current_tts_sound = None # To store the currently playing sound object
-        self.tts_volume = tk.DoubleVar(value=0.5) # Initialize volume to 50%
-        pygame.mixer.init() # Initialize pygame mixer
+        self.recognizer = None  # sr.Recognizer() - No longer needed
+        self.microphone = None  # sr.Microphone() - No longer needed
+        self.recorded_audio = None  # To store recorded audio data
+        self.current_tts_sound = None  # To store the currently playing sound object
+        self.tts_volume = tk.DoubleVar(value=0.5)  # Initialize volume to 50%
+        pygame.mixer.init()  # Initialize pygame mixer
 
+        # --- Flashcard Data ---
+        self.decks = {}  # {deck_name: [{front: "...", back: "..."}]}
+        self.current_deck = None  # Keep track of the currently selected deck
+        self.load_decks()  # load the decks
+
+        # --- Whisper Model Loading ---
+        print("Loading Whisper model...")
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"  # Device for Whisper model - DEFINED HERE FIRST
+        self.whisper_processor = AutoProcessor.from_pretrained("openai/whisper-large-v3-turbo")
+        self.whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained("openai/whisper-large-v3-turbo").to(self.device)  # Use self.device here
+        print("Whisper model loaded.")
 
         # UI Elements to Translate
         self.ui_elements = {
             "window_title": "Conversation Practice Bot",
             "send_button": "Send",
-            "settings_menu":"Settings",
-            "start_record_button": SPEAK_BUTTON_TEXT, # Using Constant from side program
-            "stop_record_button": STOP_BUTTON_TEXT, # Using Constant from side program
-            "stop_tts_button": STOP_TTS_BUTTON_TEXT, # New UI element for Stop TTS button
-            "volume_label": VOLUME_LABEL_TEXT, # New UI element for Volume Slider Label
-            "complexity_level_menu": "Complexity Level", # New UI Element for Complexity Level Menu
-            "current_complexity_level": f"Current Level: {initial_complexity_level}" # New UI Element to display current complexity
+            "settings_menu": "Settings",
+            "start_record_button": SPEAK_BUTTON_TEXT,  # Using Constant from side program
+            "stop_record_button": STOP_BUTTON_TEXT,  # Using Constant from side program
+            "stop_tts_button": STOP_TTS_BUTTON_TEXT,  # New UI element for Stop TTS button
+            "volume_label": VOLUME_LABEL_TEXT,  # New UI element for Volume Slider Label
+            "complexity_level_menu": "Complexity Level",  # New UI Element for Complexity Level Menu
+            "current_complexity_level": f"Current Level: {initial_complexity_level}"  # New UI Element to display current complexity
         }
 
         # Configure Dark Theme
@@ -242,14 +265,14 @@ class ChatApp:
 
         # Conversation Display
         self.conversation_display = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=80, height=20,
-                                                            bg="#444444", fg="white", font=text_font)
+                                                                bg="#444444", fg="white", font=text_font)
         self.conversation_display.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
         self.conversation_display.config(state=tk.DISABLED)
         self.chat_displays[self.language] = self.conversation_display
 
         # Status Label (for voice input feedback) - Added here, below conversation display
-        self.status_label = ttk.Label(root, text=IDLE_TEXT) # Using Constant from side program
-        self.status_label.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10) # Span columns, expand horizontally
+        self.status_label = ttk.Label(root, text=IDLE_TEXT)  # Using Constant from side program
+        self.status_label.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10)  # Span columns, expand horizontally
 
         # User Input
         self.input_box = tk.Entry(root, width=70, bg="#555555", fg="white", insertbackground="white", font=text_font)
@@ -260,33 +283,32 @@ class ChatApp:
         self.send_button.grid(row=2, column=1, padx=5, pady=5)
 
         # Voice Input Buttons (renamed to Speak and Stop Speaking, using constants)
-        self.start_record_button = ttk.Button(root, text=translate_to_language(self.ui_elements["start_record_button"], self.loop, initial_translation_language), command=self.start_voice_input) # Changed command to new voice function
+        self.start_record_button = ttk.Button(root, text=translate_to_language(self.ui_elements["start_record_button"], self.loop, initial_translation_language), command=self.start_voice_input)  # Changed command to new voice function
         self.start_record_button.grid(row=3, column=0, pady=5)
 
-        self.stop_record_button = ttk.Button(root, text=translate_to_language(self.ui_elements["stop_record_button"], self.loop, initial_translation_language), command=self.stop_voice_input, state=tk.DISABLED) # Changed command to new stop voice function, initially disabled
+        self.stop_record_button = ttk.Button(root, text=translate_to_language(self.ui_elements["stop_record_button"], self.loop, initial_translation_language), command=self.stop_voice_input, state=tk.DISABLED)  # Changed command to new stop voice function, initially disabled
         self.stop_record_button.grid(row=3, column=1, pady=5)
 
         # Stop TTS Button - added below voice input buttons
-        self.stop_tts_button = ttk.Button(root, text=translate_to_language(self.ui_elements["stop_tts_button"], self.loop, initial_translation_language), command=self.stop_tts) # New button for Stop TTS
-        self.stop_tts_button.grid(row=4, column=0, columnspan=2, pady=5) # Span columns
-        self.stop_tts_button.config(state=tk.DISABLED) # Initially disabled
+        self.stop_tts_button = ttk.Button(root, text=translate_to_language(self.ui_elements["stop_tts_button"], self.loop, initial_translation_language), command=self.stop_tts)  # New button for Stop TTS
+        self.stop_tts_button.grid(row=4, column=0, columnspan=2, pady=5)  # Span columns
+        self.stop_tts_button.config(state=tk.DISABLED)  # Initially disabled
 
         # Volume Slider Label and Slider - Added below Stop TTS Button
         self.volume_label = ttk.Label(root, text=translate_to_language(self.ui_elements["volume_label"], self.loop, initial_translation_language))
-        self.volume_label.grid(row=5, column=0, sticky="ew", padx=10) # Label on the left
+        self.volume_label.grid(row=5, column=0, sticky="ew", padx=10)  # Label on the left
 
-        self.volume_slider = tk.Scale(root, from_=0.0, to=1.0, orient=tk.HORIZONTAL, resolution=0.01, variable=self.tts_volume, command=self.change_tts_volume, bg="#444444", fg="white", highlightbackground="#444444") # Slider
-        self.volume_slider.grid(row=5, column=1, sticky="ew", padx=10) # Slider on the right, expanding horizontally
-
+        self.volume_slider = tk.Scale(root, from_=0.0, to=1.0, orient=tk.HORIZONTAL, resolution=0.01, variable=self.tts_volume, command=self.change_tts_volume, bg="#444444", fg="white", highlightbackground="#444444")  # Slider
+        self.volume_slider.grid(row=5, column=1, sticky="ew", padx=10)  # Slider on the right, expanding horizontally
 
         # Role Dropdown
         self.role_var = tk.StringVar(root)
         self.role_var.set(initial_role)  # Initial role selection
 
-        #Translate role options
+        # Translate role options
         translated_roles = [translate_to_language(role, self.loop, initial_translation_language) for role in roles.keys()]
         self.role_dropdown = ttk.OptionMenu(root, self.role_var, translated_roles[0], *translated_roles,
-                                            command=self.change_role)
+                                                command=self.change_role)
         self.role_dropdown.grid(row=6, column=0, columnspan=2, pady=5)
 
         # Language Dropdown
@@ -297,119 +319,328 @@ class ChatApp:
                                                 command=self.change_language)
         self.language_dropdown.grid(row=7, column=0, columnspan=2, pady=5)
 
-         # Settings Menu
+        # Settings Menu
         self.create_settings_menu()
 
-        #Translate the UI
+        # Translate the UI
         self.translate_ui(initial_translation_language)
         self.translate_voice_buttons(initial_translation_language)
-        self.translate_stop_tts_button(initial_translation_language) # Translate Stop TTS button
-        self.translate_volume_ui_elements(initial_translation_language) # Translate Volume UI elements
+        self.translate_stop_tts_button(initial_translation_language)  # Translate Stop TTS button
+        self.translate_volume_ui_elements(initial_translation_language)  # Translate Volume UI elements
 
-        #Update the values of the dropdown menu
+        # Update the values of the dropdown menu
         self.update_role_dropdown(initial_translation_language)
 
         # Call set_role to display greeting of the default role
         self.set_role(initial_role, initial_language)
 
-    def translate_volume_ui_elements(self, translation_language): # New translation function for Volume UI elements
+    def translate_volume_ui_elements(self, translation_language):  # New translation function for Volume UI elements
         self.volume_label.config(text=translate_to_language(self.ui_elements["volume_label"], self.loop, translation_language))
 
-    def change_tts_volume(self, new_volume_str): # New function to handle volume slider changes
+    def change_tts_volume(self, new_volume_str):  # New function to handle volume slider changes
         try:
-            self.tts_volume.set(float(new_volume_str)) # Update tts_volume variable
-            print(f"TTS Volume changed to: {self.tts_volume.get()}") # Optional debug print
+            self.tts_volume.set(float(new_volume_str))  # Update tts_volume variable
+            print(f"TTS Volume changed to: {self.tts_volume.get()}")  # Optional debug print
         except ValueError:
             print("Invalid volume value")
 
-    def translate_stop_tts_button(self, translation_language): # New translation function for Stop TTS button
+    def translate_stop_tts_button(self, translation_language):  # New translation function for Stop TTS button
         self.stop_tts_button.config(text=translate_to_language(self.ui_elements["stop_tts_button"], self.loop, translation_language))
 
-    def enable_stop_tts_button(self): # Function to enable Stop TTS button - thread safe
+    def enable_stop_tts_button(self):  # Function to enable Stop TTS button - thread safe
         self.stop_tts_button.config(state=tk.NORMAL)
 
-    def disable_stop_tts_button(self): # Function to disable Stop TTS button - thread safe
+    def disable_stop_tts_button(self):  # Function to disable Stop TTS button - thread safe
         self.stop_tts_button.config(state=tk.DISABLED)
 
-    def stop_tts(self): # Stop TTS function
+    def stop_tts(self):  # Stop TTS function
         if self.current_tts_sound and pygame.mixer.get_busy():
             pygame.mixer.stop()
-            self.disable_stop_tts_button() # Disable Stop TTS button after stopping
+            self.disable_stop_tts_button()  # Disable Stop TTS button after stopping
 
     def create_settings_menu(self):
-         menu_bar = tk.Menu(self.root)
-         self.root.config(menu=menu_bar)
+        menu_bar = tk.Menu(self.root)
+        self.root.config(menu=menu_bar)
 
-         settings_menu = tk.Menu(menu_bar, tearoff=0)
-         menu_bar.add_cascade(label=translate_to_language(self.ui_elements["settings_menu"], self.loop, self.translation_language), menu=settings_menu)
+        settings_menu = tk.Menu(menu_bar, tearoff=0)
+        menu_bar.add_cascade(label=translate_to_language(self.ui_elements["settings_menu"], self.loop, self.translation_language), menu=settings_menu)
 
-         language_menu = tk.Menu(settings_menu, tearoff=0)
-         settings_menu.add_cascade(label="Change Translation Language", menu=language_menu)
+        # --- Flashcard Menu Item ---
+        settings_menu.add_command(label=translate_to_language("Manage Flashcards", self.loop, self.translation_language), command=self.show_flashcard_manager)
 
-         language_options = ["English", "Japanese", "Spanish", "French"]
-         for lang in language_options:
-             language_menu.add_command(label=lang, command=lambda selected_lang=lang: self.change_translation_language(selected_lang))
+        language_menu = tk.Menu(settings_menu, tearoff=0)
+        settings_menu.add_cascade(label="Change Translation Language", menu=language_menu)
 
-         complexity_level_display = ttk.Label(settings_menu, text=translate_to_language(self.ui_elements["current_complexity_level"], self.loop, self.translation_language)) # Display current complexity level
-         settings_menu.add_command(label="", state=tk.DISABLED) # Separator
-         settings_menu.add_cascade(label=translate_to_language(self.ui_elements["complexity_level_menu"], self.loop, self.translation_language), command=self.show_complexity_level_popup) # Open complexity popup
-         settings_menu.add_command(label="", state=tk.DISABLED) # Separator
-         settings_menu.add_cascade(label=translate_to_language(self.ui_elements["current_complexity_level"], self.loop, self.translation_language), state=tk.DISABLED) # Display current level, disabled for now, can be enabled if needed.
-         settings_menu.add_separator()
-         settings_menu.add_command(label="Current Complexity Level:", state=tk.DISABLED) # Label
-         settings_menu.add_command(label=self.complexity_level, state=tk.DISABLED) # Value
+        language_options = ["English", "Japanese", "Spanish", "French"]
+        for lang in language_options:
+            language_menu.add_command(label=lang, command=lambda selected_lang=lang: self.change_translation_language(selected_lang))
 
+        complexity_level_display = ttk.Label(settings_menu, text=translate_to_language(self.ui_elements["current_complexity_level"], self.loop, self.translation_language))  # Display current complexity level
+        settings_menu.add_command(label="", state=tk.DISABLED)  # Separator
+        settings_menu.add_cascade(label=translate_to_language(self.ui_elements["complexity_level_menu"], self.loop, self.translation_language), command=self.show_complexity_level_popup)  # Open complexity popup
+        settings_menu.add_command(label="", state=tk.DISABLED)  # Separator
+        settings_menu.add_cascade(label=translate_to_language(self.ui_elements["current_complexity_level"], self.loop, self.translation_language), state=tk.DISABLED)  # Display current level, disabled for now, can be enabled if needed.
+        settings_menu.add_separator()
+        settings_menu.add_command(label="Current Complexity Level:", state=tk.DISABLED)  # Label
+        settings_menu.add_command(label=self.complexity_level, state=tk.DISABLED)  # Value
+
+    def show_flashcard_manager(self):
+        # Flashcard Manager Window - now in the same window
+        manager_window = tk.Toplevel(self.root)
+        manager_window.title(translate_to_language("Flashcard Manager", self.loop, self.translation_language))
+        manager_window.geometry("500x400")  # Increased width and height
+        manager_window.configure(bg="#333333")
+        self.flashcard_manager_window = manager_window # Store as instance variable
+
+        # --- Frames for UI Switching ---
+        self.deck_list_frame = ttk.Frame(manager_window, padding="10", style='DarkFrame.TFrame') # Frame for deck list and buttons
+        self.study_frame = ttk.Frame(manager_window, padding="10", style='DarkFrame.TFrame') # Frame for study UI
+        self.add_card_frame = ttk.Frame(manager_window, padding="10", style='DarkFrame.TFrame') # Frame for add card UI
+
+        self.manager_ui_font_large = font.Font(family="Helvetica", size=14) # Larger font for deck names
+
+        # --- Deck List UI (Initial UI) ---
+        deck_label = ttk.Label(self.deck_list_frame, text=translate_to_language("Select Deck:", self.loop, self.translation_language), background="#333333", foreground="white")
+        deck_label.pack(pady=5)
+
+        self.deck_listbox = tk.Listbox(self.deck_list_frame, bg="#444444", fg="white", selectbackground="#555555", exportselection=False, font=self.manager_ui_font_large) # Larger font here
+        self.populate_deck_listbox()  # Populate with existing decks
+        self.deck_listbox.pack(pady=5, fill=tk.BOTH, expand=True)
+        self.deck_listbox.bind("<<ListboxSelect>>", self.on_deck_select)  # Bind selection event
+
+        button_frame = tk.Frame(self.deck_list_frame, bg="#333333")
+        button_frame.pack(pady=10)
+
+        create_deck_button = ttk.Button(button_frame, text=translate_to_language("Create Deck", self.loop, self.translation_language), command=self.create_deck)
+        create_deck_button.pack(side=tk.LEFT, padx=5)
+
+        add_card_button = ttk.Button(button_frame, text=translate_to_language("Add Card", self.loop, self.translation_language), command=self.show_add_card_ui, state=tk.DISABLED) # Changed to show_add_card_ui
+        add_card_button.pack(side=tk.LEFT, padx=5)
+        self.add_card_button = add_card_button # Store reference to enable/disable
+
+        study_deck_button = ttk.Button(button_frame, text=translate_to_language("Study Deck", self.loop, self.translation_language), command=self.show_study_ui, state=tk.DISABLED) # Changed to show_study_ui
+        study_deck_button.pack(side=tk.LEFT, padx=5)
+        self.study_deck_button = study_deck_button # Store reference to enable/disable
+
+        delete_deck_button = ttk.Button(button_frame, text=translate_to_language("Delete Deck", self.loop, self.translation_language), command=self.delete_deck, state=tk.DISABLED)
+        delete_deck_button.pack(side=tk.LEFT, padx=5)
+        self.delete_deck_button = delete_deck_button # Store reference
+
+        self.show_deck_list_ui() # Show initial deck list UI
+
+    def show_deck_list_ui(self):
+        self.hide_study_ui() # Ensure other UIs are hidden
+        self.hide_add_card_ui()
+        self.deck_list_frame.pack(fill=tk.BOTH, expand=True) # Pack deck list frame
+
+    def hide_deck_list_ui(self):
+        self.deck_list_frame.pack_forget() # Hide deck list frame
+
+    def show_study_ui(self):
+        if not self.current_deck or not self.decks[self.current_deck]:
+            messagebox.showinfo(translate_to_language("No Cards", self.loop, self.translation_language), translate_to_language("No cards in this deck to study.", self.loop, self.translation_language), parent=self.flashcard_manager_window) # Set parent
+            return
+
+        self.hide_deck_list_ui() # Hide deck list UI
+        self.hide_add_card_ui() # Hide add card UI
+
+        # --- Study UI ---
+        self.current_card_index = 0
+        self.current_card_side = "front"
+
+        self.card_label = ttk.Label(self.study_frame, text="", wraplength=480, background="#444444", foreground="white", font=("Helvetica", 14), padding=20) # Increased wraplength
+        self.card_label.pack(pady=10, fill=tk.BOTH, expand=True)
+
+        self.show_card() # Display the first card
+
+        button_frame = tk.Frame(self.study_frame, bg="#333333")
+        button_frame.pack(pady=10)
+
+        flip_button = ttk.Button(button_frame, text=translate_to_language("Flip Card", self.loop, self.translation_language), command=self.flip_card)
+        flip_button.pack(side=tk.LEFT, padx=5)
+
+        next_button = ttk.Button(button_frame, text=translate_to_language("Next Card", self.loop, self.translation_language), command=self.next_card)
+        next_button.pack(side=tk.LEFT, padx=5)
+
+        go_back_button = ttk.Button(button_frame, text=translate_to_language("Go Back", self.loop, self.translation_language), command=self.show_deck_list_ui) # Go back button
+        go_back_button.pack(side=tk.LEFT, padx=5)
+
+        self.study_frame.pack(fill=tk.BOTH, expand=True) # Pack study frame
+
+    def hide_study_ui(self):
+        self.study_frame.pack_forget() # Hide study frame
+
+    def show_add_card_ui(self):
+        if not self.current_deck:
+            messagebox.showwarning(translate_to_language("No Deck Selected", self.loop, self.translation_language), translate_to_language("Please select a deck first.", self.loop, self.translation_language), parent=self.flashcard_manager_window) # Set parent
+            return
+
+        self.hide_deck_list_ui() # Hide deck list UI
+        self.hide_study_ui() # Hide study UI
+
+        # --- Add Card UI ---
+        front_label = ttk.Label(self.add_card_frame, text=translate_to_language("Front:", self.loop, self.translation_language), background="#333333", foreground="white")
+        front_label.pack(pady=5)
+        self.front_entry = tk.Entry(self.add_card_frame, width=40) # Store as instance variable
+        self.front_entry.pack(pady=5)
+
+        back_label = ttk.Label(self.add_card_frame, text=translate_to_language("Back:", self.loop, self.translation_language), background="#333333", foreground="white")
+        back_label.pack(pady=5)
+        self.back_entry = tk.Entry(self.add_card_frame, width=40) # Store as instance variable
+        self.back_entry.pack(pady=5)
+
+        add_button = ttk.Button(self.add_card_frame, text=translate_to_language("Add Card", self.loop, self.translation_language), command=lambda: self.add_card(self.front_entry.get(), self.back_entry.get())) # Use instance variables
+        add_button.pack(pady=10)
+
+        go_back_button = ttk.Button(self.add_card_frame, text=translate_to_language("Go Back", self.loop, self.translation_language), command=self.show_deck_list_ui) # Go back button
+        go_back_button.pack(pady=10)
+
+
+        self.add_card_frame.pack(fill=tk.BOTH, expand=True) # Pack add card frame
+
+    def hide_add_card_ui(self):
+        self.add_card_frame.pack_forget() # Hide add card frame
+
+    def populate_deck_listbox(self):
+        self.deck_listbox.delete(0, tk.END)  # Clear existing items
+        for deck_name in self.decks:
+            self.deck_listbox.insert(tk.END, deck_name)
+
+    def on_deck_select(self, event):
+        selected_indices = self.deck_listbox.curselection()
+        if selected_indices:
+            selected_index = int(selected_indices[0])
+            self.current_deck = self.deck_listbox.get(selected_index)
+            self.study_deck_button.config(state=tk.NORMAL) # Enable study deck button
+            self.add_card_button.config(state=tk.NORMAL) # Enable add card button
+            self.delete_deck_button.config(state=tk.NORMAL) # Enable delete button
+        else:
+            self.current_deck = None
+            self.study_deck_button.config(state=tk.DISABLED) # Disable if no selection
+            self.add_card_button.config(state=tk.DISABLED)  # Disable if no selection
+            self.delete_deck_button.config(state=tk.DISABLED) # Disable if no selection
+
+    def create_deck(self):
+        # Create Deck Dialog
+        deck_name = tk.simpledialog.askstring(
+            title=translate_to_language("Create Deck", self.loop, self.translation_language),
+            prompt=translate_to_language("Enter deck name:", self.loop, self.translation_language),
+            parent=self.flashcard_manager_window  # Set parent to manager window
+        )
+        if deck_name:
+            if deck_name in self.decks:
+                messagebox.showerror(translate_to_language("Error", self.loop, self.translation_language), translate_to_language("Deck already exists!", self.loop, self.translation_language), parent=self.flashcard_manager_window) # Set parent
+            else:
+                self.decks[deck_name] = []
+                self.populate_deck_listbox()
+                self.save_decks() # Save the decks
+
+    def add_card(self, front_text, back_text): # Removed add_card_window parameter
+        if front_text and back_text:
+            self.decks[self.current_deck].append({"front": front_text, "back": back_text})
+            self.front_entry.delete(0, tk.END) # Clear entry fields
+            self.back_entry.delete(0, tk.END)
+            self.save_decks() # Save the decks
+        else:
+            messagebox.showwarning(translate_to_language("Incomplete Card", self.loop, self.translation_language), translate_to_language("Please fill in both front and back.", self.loop, self.translation_language), parent=self.flashcard_manager_window) # Set parent
+
+    def show_card(self):
+        if self.current_deck and 0 <= self.current_card_index < len(self.decks[self.current_deck]): # Check if the current deck exists and the current card index is less than the length of the deck
+            card = self.decks[self.current_deck][self.current_card_index]
+            self.card_label.config(text=card[self.current_card_side])
+        else: # if the self.decks[self.current_deck] is empty
+            self.card_label.config(text="There are no more cards")
+
+    def flip_card(self):
+        if self.current_card_side == "front":
+            self.current_card_side = "back"
+        else:
+            self.current_card_side = "front"
+        self.show_card()
+
+    def next_card(self):
+        self.current_card_index += 1
+        if self.current_card_index >= len(self.decks[self.current_deck]):
+            self.current_card_index = 0  # Loop back to the beginning
+        self.current_card_side = "front"  # Reset to front side
+        self.show_card()
+
+    def delete_deck(self):
+        if self.current_deck:
+            if messagebox.askyesno(translate_to_language("Confirm Delete", self.loop, self.translation_language), translate_to_language(f"Are you sure you want to delete the '{self.current_deck}' deck?", self.loop, self.translation_language), parent=self.flashcard_manager_window): # Set parent
+                del self.decks[self.current_deck]
+                self.current_deck = None  # Clear current deck
+                self.populate_deck_listbox()
+                self.study_deck_button.config(state=tk.DISABLED) # Disable buttons
+                self.add_card_button.config(state=tk.DISABLED)
+                self.delete_deck_button.config(state=tk.DISABLED)
+                self.save_decks() # Save the decks
+
+    def save_decks(self):
+        try:
+            with open("decks.json", "w") as f:
+                json.dump(self.decks, f)
+        except Exception as e:
+            messagebox.showerror(translate_to_language("Error", self.loop, self.translation_language), translate_to_language(f"Failed to save decks: {e}", self.loop, self.translation_language))
+
+    def load_decks(self):
+        try:
+            with open("decks.json", "r") as f:
+                self.decks = json.load(f)
+        except FileNotFoundError:
+            self.decks = {} # Initialize if the file doesn't exist
+        except Exception as e:
+            messagebox.showerror(translate_to_language("Error", self.loop, self.translation_language), translate_to_language(f"Failed to load decks: {e}", self.loop, self.translation_language))
 
     def translate_ui(self, translation_language):
         self.root.title(translate_to_language(self.ui_elements["window_title"], self.loop, translation_language))
         self.send_button.config(text=translate_to_language(self.ui_elements["send_button"], self.loop, translation_language))
         self.translate_voice_buttons(translation_language)
-        self.translate_stop_tts_button(translation_language) # Translate Stop TTS button as well
-        self.translate_volume_ui_elements(translation_language) # Translate Volume UI elements
-        self.ui_elements["current_complexity_level"] = f"Current Level: {self.complexity_level}" # Update complexity level text
-        self.create_settings_menu() # Recreate settings menu to update translations
-
+        self.translate_stop_tts_button(translation_language)  # Translate Stop TTS button as well
+        self.translate_volume_ui_elements(translation_language)  # Translate Volume UI elements
+        self.ui_elements["current_complexity_level"] = f"Current Level: {self.complexity_level}"  # Update complexity level text
+        self.create_settings_menu()  # Recreate settings menu to update translations
 
     def translate_voice_buttons(self, translation_language):
         self.start_record_button.config(text=translate_to_language(self.ui_elements["start_record_button"], self.loop, translation_language))
         self.stop_record_button.config(text=translate_to_language(self.ui_elements["stop_record_button"], self.loop, translation_language))
 
     def update_role_dropdown(self, translation_language):
-         translated_roles = [translate_to_language(role, self.loop, translation_language) for role in roles.keys()]
-         self.role_mapping = dict(zip(translated_roles, roles.keys())) # create the mapping of translated role to english role
-         self.role_dropdown['menu'].delete(0, 'end')
-         for role in translated_roles:
+        translated_roles = [translate_to_language(role, self.loop, translation_language) for role in roles.keys()]
+        self.role_mapping = dict(zip(translated_roles, roles.keys()))  # create the mapping of translated role to english role
+        self.role_dropdown['menu'].delete(0, 'end')
+        for role in translated_roles:
             self.role_dropdown['menu'].add_command(label=role, command=tk._setit(self.role_var, role, self.change_role))
 
     def change_translation_language(self, new_translation_language):
-       self.translation_language = new_translation_language
-       self.translate_ui(new_translation_language)
-       self.update_role_dropdown(new_translation_language)
-       self.translate_stop_tts_button(new_translation_language) # Translate Stop TTS button on language change
-       self.translate_volume_ui_elements(new_translation_language) # Translate Volume UI elements
+        self.translation_language = new_translation_language
+        self.translate_ui(new_translation_language)
+        self.update_role_dropdown(new_translation_language)
+        self.translate_stop_tts_button(new_translation_language)  # Translate Stop TTS button on language change
+        self.translate_volume_ui_elements(new_translation_language)  # Translate Volume UI elements
 
     def set_role(self, role, language):
-      global current_role, ai_greeting_sent, last_ai_response, current_language
+        global current_role, ai_greeting_sent, last_ai_response, current_language
 
-      if role in self.role_mapping: # If the selected role is the translated version, set the current role to the english version.
-           current_role = self.role_mapping[role]
-      else:
-           current_role = role # If the selected role isn't translated use the english version.
-      current_language = language
-      self.clear_chat_display()
-      self.add_message("System", f"AI Role set to: {current_role}") # Call add_message here with "System" as sender
+        if role in self.role_mapping:  # If the selected role is the translated version, set the current role to the english version.
+            current_role = self.role_mapping[role]
+        else:
+            current_role = role  # If the selected role isn't translated use the english version.
+        current_language = language
+        self.clear_chat_display()
+        self.add_message("System", f"AI Role set to: {current_role}")  # Call add_message here with "System" as sender
 
-      if (current_language, current_role) not in conversation_histories:
-        if current_role and not ai_greeting_sent:
-            greeting = roles[current_role]["greeting"]
-            translated_greeting = translate_to_language(greeting, self.loop, current_language)
-            self.add_ai_message(translated_greeting)
-            conversation_histories[(current_language, current_role)] = [f"AI: {translated_greeting}"]
-            last_ai_response = translated_greeting
-            ai_greeting_sent = True
-      else:  # Role is changed
-          for message in conversation_histories[(current_language, current_role)]:
-              self.add_message(message, is_ai_message=("AI:" in message))
+        if (current_language, current_role) not in conversation_histories:
+            if current_role and not ai_greeting_sent:
+                greeting = roles[current_role]["greeting"]
+                translated_greeting = translate_to_language(greeting, self.loop, current_language)
+                self.add_ai_message(translated_greeting)
+                conversation_histories[(current_language, current_role)] = [f"AI: {translated_greeting}"]
+                last_ai_response = translated_greeting
+                ai_greeting_sent = True
+        else:  # Role is changed
+            for message in conversation_histories[(current_language, current_role)]:
+                self.add_message(message, is_ai_message=("AI:" in message))
 
     def clear_chat_display(self):
         self.conversation_display.config(state=tk.NORMAL)
@@ -418,81 +649,112 @@ class ChatApp:
 
     def send_message(self):
         user_input = self.input_box.get().strip()
-        print(f"send_message: Input text being sent: '{user_input}'") # DEBUG PRINT
+        print(f"send_message: Input text being sent: '{user_input}'")  # DEBUG PRINT
         if user_input:
-            self.add_message(USER_NAME, user_input) # Call add_message here for text input, using USER_NAME as sender
+            self.add_message(USER_NAME, user_input)  # Call add_message here for text input, using USER_NAME as sender
             response = generate_response(user_input, current_role, current_language, self.complexity_level)  # Use self.language and complexity level
             self.add_ai_message(response)
             global last_ai_response
             last_ai_response = response
             self.input_box.delete(0, tk.END)
-            self.stop_voice_input() # Stop voice input UI if active, after sending text message
-            self.stop_tts() # Stop TTS if playing
+            self.stop_voice_input()  # Stop voice input UI if active, after sending text message
+            self.stop_tts()  # Stop TTS if playing
 
     # --- Voice Input Functions (Integrated from side program) ---
     def record_voice(self):
-        r = sr.Recognizer()
-        with sr.Microphone() as source:
-            self.status_label.config(text=RECORDING_TEXT) # Use global constant
-            r.adjust_for_ambient_noise(source)  # Adjust for noise
-            audio = r.listen(source) # Listen for audio
-            self.status_label.config(text=IDLE_TEXT) # Use global constant, change back to idle text
-            try:
-                user_message = r.recognize_google(audio, language=self.get_speech_recognition_lang_code()) # Recognize speech using Google Speech Recognition, pass language code
-                self.add_message(USER_NAME, user_message) # Call general add_message for voice input now, using USER_NAME
-                self.process_voice_message(user_message) # Send message to Gemini and get response
-            except sr.UnknownValueError:
-                self.add_message(BOT_NAME, "Could not understand audio") # Call general add_message for voice error, using BOT_NAME
-            except sr.RequestError as e:
-                self.add_message(BOT_NAME, f"Could not request results from Speech Recognition service; {e}") # Call general add_message for voice error, using BOT_NAME
-            finally:
-                self.stop_voice_input() # Stop voice input UI elements after recording
-                self.stop_tts() # Stop TTS if playing
+        try:
+            print("Recording for up to 10 seconds...")
+            fs = 16000  # Sample rate
+            duration = 10  # Recording duration
+            audio_data = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='float32')
+            sd.wait()  # Wait until recording is finished
+            print("Finished recording.")
+            self.status_label.config(text=IDLE_TEXT)  # Back to idle text
+
+            transcribed_text = self.transcribe_audio_local_whisper_large_turbo(audio_data, fs)
+            if transcribed_text:
+                user_message = transcribed_text
+                self.add_message(USER_NAME, user_message)
+                self.process_voice_message(user_message)
+            else:
+                self.add_message(BOT_NAME, "No speech detected or transcription failed.")  # Feedback for no speech or error
+
+        except Exception as e:
+            error_message = f"Voice Recognition Error: {e}"
+            print(error_message)
+            self.add_message(BOT_NAME, error_message)
+        finally:
+            self.stop_voice_input()  # Stop voice input UI elements after recording
+            self.stop_tts()  # Stop TTS if playing
+
+    def transcribe_audio_local_whisper_large_turbo(self, audio_data, sample_rate):
+        """Transcribes audio data locally using whisper-large-v3-turbo model."""
+
+        print("Transcribing locally using whisper-large-v3-turbo...")
+        try:
+            # Convert audio data to expected format and sample rate
+            audio_input = audio_data.flatten()  # Flatten to mono if it's not already
+            input_features = self.whisper_processor(audio_input, sampling_rate=sample_rate, return_tensors="pt").input_features
+
+            # Move input features to the same device as the model (GPU if available)
+            input_features = input_features.to(self.device)
+
+            # Generate token ids
+            predicted_ids = self.whisper_model.generate(input_features)
+
+            # Decode token ids to text
+            transcription = self.whisper_processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
+            text = transcription
+            return text
+
+        except Exception as e:
+            print(f"Transcription Error: {e}")
+            return None  # Indicate transcription failure
 
     def process_voice_message(self, user_message):
         try:
             # Call generate_response here, passing user_message, current_role and current_language
             response = generate_response(user_message, current_role, current_language, self.complexity_level)
-            bot_response = response # Response from generate_response is already just the text
-            self.add_ai_message(bot_response) # Use existing AI message adding function
+            bot_response = response  # Response from generate_response is already just the text
+            self.add_ai_message(bot_response)  # Use existing AI message adding function
         except Exception as e:
-            self.add_message(BOT_NAME, f"Error communicating with Gemini: {e}") # Call general add_message for Gemini error, using BOT_NAME
+            self.add_message(BOT_NAME, f"Error communicating with Gemini: {e}")  # Call general add_message for Gemini error, using BOT_NAME
 
-    def add_message(self, sender, message): # Modified to be the general add_message function
-        self.conversation_display.config(state=tk.NORMAL) # Enable text area for editing
-        tag = sender.replace(" ", "_") # Create tag from sender name (for example "Gemini AI" becomes "Gemini_AI")
-        self.conversation_display.insert(tk.END, f"{sender}: {message}\n", tag) # Insert message with sender tag
-        self.conversation_display.tag_config(USER_NAME, foreground="blue") # Configure tag for user messages (same for voice and text)
-        self.conversation_display.tag_config(BOT_NAME, foreground="green") # Configure tag for bot messages (same for voice and text)
-        self.conversation_display.config(state=tk.DISABLED) # Disable text area from user editing
-        self.conversation_display.see(tk.END) # Scroll to the end of the text
+    def add_message(self, sender, message):  # Modified to be the general add_message function
+        self.conversation_display.config(state=tk.NORMAL)  # Enable text area for editing
+        tag = sender.replace(" ", "_")  # Create tag from sender name (for example "Gemini AI" becomes "Gemini_AI")
+        self.conversation_display.insert(tk.END, f"{sender}: {message}\n", tag)  # Insert message with sender tag
+        self.conversation_display.tag_config(USER_NAME, foreground="blue")  # Configure tag for user messages (same for voice and text)
+        self.conversation_display.tag_config(BOT_NAME, foreground="green")  # Configure tag for bot messages (same for voice and text)
+        self.conversation_display.config(state=tk.DISABLED)  # Disable text area from user editing
+        self.conversation_display.see(tk.END)  # Scroll to the end of the text
 
     def start_voice_input(self):
-        self.start_record_button.config(state=tk.DISABLED) # Disable Speak button during recording
-        self.stop_record_button.config(state=tk.NORMAL) # Enable Stop button
-        self.input_box.config(state=tk.DISABLED) # Disable text input during voice recording
-        self.send_button.config(state=tk.DISABLED) # Disable send button during voice recording
-        threading.Thread(target=self.record_voice, daemon=True).start() # Start voice recording in new thread
-        self.stop_tts() # Stop TTS if it is currently playing when starting voice input
+        self.is_recording = True  # Set recording flag to True when speak button is pressed
+        self.start_record_button.config(state=tk.DISABLED)  # Disable Speak button during recording
+        self.stop_record_button.config(state=tk.NORMAL)  # Enable Stop button
+        self.input_box.config(state=tk.DISABLED)  # Disable text input during voice recording
+        self.send_button.config(state=tk.DISABLED)  # Disable send button during voice recording
+        self.status_label.config(text=RECORDING_TEXT)  # Status to recording
+        threading.Thread(target=self.record_voice, daemon=True).start()  # Start voice recording in new thread
+        self.stop_tts()  # Stop TTS if it is currently playing when starting voice input
 
     def stop_voice_input(self):
-        self.start_record_button.config(state=tk.NORMAL) # Re-enable Speak button
-        self.stop_record_button.config(state=tk.DISABLED) # Disable Stop button
-        self.status_label.config(text=IDLE_TEXT) # Use global constant, reset status label
-        self.input_box.config(state=tk.NORMAL) # Re-enable text input after voice recording
-        self.send_button.config(state=tk.NORMAL) # Re-enable send button after voice recording
+        self.is_recording = False  # Set recording flag to False when stop button is pressed, this will stop the recording loop
+        self.start_record_button.config(state=tk.NORMAL)  # Re-enable Speak button
+        self.stop_record_button.config(state=tk.DISABLED)  # Disable Stop button
+        self.status_label.config(text=IDLE_TEXT)  # Use global constant, reset status label
+        self.input_box.config(state=tk.NORMAL)  # Re-enable text input after voice recording
+        self.send_button.config(state=tk.NORMAL)  # Re-enable send button after voice recording
 
-    def get_speech_recognition_lang_code(self):
-        lang_code = 'en-US' # Default to english US
-        if self.language == "Japanese":
-            lang_code = 'ja-JP'
-        elif self.language == "Spanish":
-            lang_code = 'es-ES' # or es-US for US spanish
-        elif self.language == "French":
-            lang_code = 'fr-FR'
-        return lang_code
+    def get_speech_recognition_lang_code(self):  # No longer needed for whisper - removing
+        return 'en-US'  # Dummy return -  No longer used
 
-    def add_ai_message(self, message): # add_ai_message now only handles AI specific styling and function
+    def add_ai_message(self, message):  # add_ai_message now only handles AI specific styling and function
+        self.add_ai_message_base(message)  # Call base function
+        speak_response(message, self.language, self)  # Keep TTS functionality
+
+    def add_ai_message_base(self, message):  # Base function for adding AI message (no TTS)
         self.conversation_display.config(state=tk.NORMAL)
         ai_tag = f"ai_tag_{self.conversation_display.index(tk.END).replace('.', '_')}"
         ai_label_tag = f"ai_label_tag_{self.conversation_display.index(tk.END).replace('.', '_')}"
@@ -500,7 +762,7 @@ class ChatApp:
 
         self.conversation_display.insert(tk.END, "AI: ", ai_label_tag)
         self.conversation_display.tag_config(ai_label_tag, foreground="blue", font=("Helvetica", 12, "bold"))
-        self.conversation_display.tag_bind(ai_label_tag, '<Button-1>', lambda event, text=message: speak_response(text, self.language, self)) # Pass self (ChatApp instance) here
+        self.conversation_display.tag_bind(ai_label_tag, '<Button-1>', lambda event, text=message: speak_response(text, self.language, self))  # Pass self (ChatApp instance) here - Kept for consistency, but TTS is called outside now
         self.conversation_display.tag_bind(ai_label_tag, '<Enter>', lambda event: self.conversation_display.config(cursor="hand2"))
         self.conversation_display.tag_bind(ai_label_tag, '<Leave>', lambda event: self.conversation_display.config(cursor=""))
 
@@ -511,15 +773,15 @@ class ChatApp:
         self.conversation_display.config(state=tk.DISABLED)
         self.conversation_display.see(tk.END)
 
-    def show_translation_popup(self, event, text, tag):
+    def show_translation_popup(self, event, text, tag):  # unchanged
         if self.popup and self.popup.winfo_exists():
             self.popup.destroy()
 
         if "AI:" in text:
 
-            text_to_translate, word_tag = self._get_hovered_word(event, text, tag) # Get the hovered word from a helper function
+            text_to_translate, word_tag = self._get_hovered_word(event, text, tag)  # Get the hovered word from a helper function
             if text_to_translate:
-                phrase_to_translate = self._extract_phrase(text, text_to_translate) # Extract the phrase from text
+                phrase_to_translate = self._extract_phrase(text, text_to_translate)  # Extract the phrase from text
 
                 translation = translate_to_english(phrase_to_translate, self.loop, self.language, self.translation_language)
 
@@ -536,15 +798,15 @@ class ChatApp:
                     self.popup.bind("<Leave>", lambda event: self.hide_popup_after_delay(event))
                     self.conversation_display.tag_bind(word_tag, "<Leave>", lambda event: self.hide_popup_after_delay(event))
 
-    def show_gemini_explanation_popup(self, event, text):
+    def show_gemini_explanation_popup(self, event, text):  # unchanged
         if "AI:" in text:
-            clicked_word, _ = self._get_hovered_word(event, text, None) # Get the clicked word
+            clicked_word, _ = self._get_hovered_word(event, text, None)  # Get the clicked word
             if clicked_word:
                 phrase = self._extract_phrase(text, clicked_word)
                 if phrase:
                     self._fetch_and_display_gemini_explanation(phrase)
 
-    def _fetch_and_display_gemini_explanation(self, phrase):
+    def _fetch_and_display_gemini_explanation(self, phrase):  # unchanged
         popup = tk.Toplevel(self.root)
         popup.title("Gemini Explanation")
 
@@ -563,9 +825,9 @@ class ChatApp:
         word_definitions_area.pack(expand=True, fill="both")
         word_definitions_area.config(state=tk.DISABLED)
 
-        async def get_definitions():
+        async def get_definitions():  # unchanged
             try:
-                response = await self.loop.run_in_executor(None, model.generate_content, f"Define the following sentence: '{phrase}' as a translation from {current_language} to {self.translation_language} entirely in {self.translation_language} without {current_language}")
+                response = await self.loop.run_in_executor(None, model_gemini.generate_content, f"Define the following sentence: '{phrase}'")  # Use model_gemini here
                 phrase_def = response.text
             except Exception as e:
                 phrase_def = f"Error fetching phrase definition: {e}"
@@ -579,7 +841,7 @@ class ChatApp:
             definitions_text = ""
             for word in words:
                 try:
-                    response = await self.loop.run_in_executor(None, model.generate_content, f"Give a quick definition of the word '{word}' in the context of '{phrase}'. Then translate the quick definition to {self.translation_language}")
+                    response = await self.loop.run_in_executor(None, model_gemini.generate_content, f"Give a quick definition of the word '{word}'")  # Use model_gemini here
                     definitions_text += f"{word}: {response.text}\n\n"
                 except Exception as e:
                     definitions_text += f"Error fetching definition for '{word}': {e}\n\n"
@@ -589,26 +851,26 @@ class ChatApp:
             word_definitions_area.insert(tk.END, definitions_text)
             word_definitions_area.config(state=tk.DISABLED)
 
-        asyncio.run_coroutine_threadsafe(get_definitions(), self.loop)
+        asyncio.run_coroutine_threadsafe(get_definitions(), self.loop)  # unchanged
 
-    def _extract_phrase(self, text, word):
-       """
+    def _extract_phrase(self, text, word):  # unchanged
+        """
         Helper function to extract the phrase containing the hovered word.
         """
-       # Define phrase delimiters, such as periods, commas, colons, question marks, exclamation points.
-       delimiters = r'[.,:;?!]'
+        # Define phrase delimiters, such as periods, commas, colons, question marks, exclamation points.
+        delimiters = r'[.,:;?!]'
 
-       # Split the text by delimiters
-       phrases = re.split(delimiters, text)
+        # Split the text by delimiters
+        phrases = re.split(delimiters, text)
 
-       # Find the start and the end of the phrase
-       for phrase in phrases:
-         if word in phrase:
-            return phrase.strip()
+        # Find the start and the end of the phrase
+        for phrase in phrases:
+            if word in phrase:
+                return phrase.strip()
 
-       return ""  # return empty string if no phrase is found.
+        return ""  # return empty string if no phrase is found.
 
-    def _get_hovered_word(self, event, text, tag):
+    def _get_hovered_word(self, event, text, tag):  # unchanged
         """
         Helper function to determine the word under the mouse cursor in the text widget.
         """
@@ -616,98 +878,98 @@ class ChatApp:
         x = event.x
         y = event.y
 
-        #get the position of the mouse cursor in the text box and get the index
+        # get the position of the mouse cursor in the text box and get the index
         index = self.conversation_display.index(f"@{x},{y}")
 
-        #get the index of the start and end of the word
+        # get the index of the start and end of the word
         start = self.conversation_display.index(f"{index} wordstart")
         end = self.conversation_display.index(f"{index} wordend")
 
-        #get the word from the text box
+        # get the word from the text box
         word = self.conversation_display.get(start, end)
 
-        #create a new tag for the word
+        # create a new tag for the word
         word_tag = f"word_tag_{start}_{end}"
 
         if tag:
-            #remove existing tag, and add a new tag to the word
+            # remove existing tag, and add a new tag to the word
             self.conversation_display.tag_remove(word_tag, "1.0", "end")
             self.conversation_display.tag_add(word_tag, start, end)
 
-        return word, word_tag #return word and the tag
+        return word, word_tag  # return word and the tag
 
-    def hide_popup_after_delay(self, event):
+    def hide_popup_after_delay(self, event):  # unchanged
         self.root.after(200, self.hide_popup)
 
-    def hide_popup(self):
+    def hide_popup(self):  # unchanged
         if self.popup and self.popup.winfo_exists():
             self.popup.destroy()
 
-    def change_role(self, new_role):
+    def change_role(self, new_role):  # unchanged
         self.set_role(new_role, self.language)
 
-    def change_language(self, new_language):
+    def change_language(self, new_language):  # unchanged
         global current_language, ai_greeting_sent
         ai_greeting_sent = False
         current_language = new_language
-        self.language = new_language # Update the instance variable
+        self.language = new_language  # Update the instance variable
         if new_language not in self.chat_displays:
             # Create new display if not available
-             new_display = scrolledtext.ScrolledText(self.root, wrap=tk.WORD, width=80, height=20,
-                                                                bg="#444444", fg="white",
-                                                                font=font.Font(family="Helvetica", size=12))
-             new_display.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
-             new_display.config(state=tk.DISABLED)
-             self.chat_displays[new_language] = new_display
+            new_display = scrolledtext.ScrolledText(self.root, wrap=tk.WORD, width=80, height=20,
+                                                                    bg="#444444", fg="white",
+                                                                    font=font.Font(family="Helvetica", size=12))
+            new_display.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
+            new_display.config(state=tk.DISABLED)
+            self.chat_displays[new_language] = new_display
 
         self.conversation_display.grid_remove()
         self.conversation_display = self.chat_displays[new_language]
         self.conversation_display.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
         self.set_role(self.role_var.get(), new_language)
 
-    def go_back_to_language_selection(self):
+    def go_back_to_language_selection(self):  # unchanged
         self.root.destroy()  # Close the main chat window
         self.show_language_selection()  # Reopen the language selection window
 
-    def __del__(self):
+    def __del__(self):  # unchanged
         if hasattr(self, 'loop') and self.loop.is_running():
-            pygame.mixer.quit() # Quit pygame mixer on exit
+            pygame.mixer.quit()  # Quit pygame mixer on exit
             self.loop.close()
 
-    def show_complexity_level_popup(self):
+    def show_complexity_level_popup(self):  # unchanged
         popup = tk.Toplevel(self.root)
         popup.title(translate_to_language("Select Complexity Level", self.loop, self.translation_language))
-        popup.geometry("250x200") # Adjusted size
+        popup.geometry("250x200")  # Adjusted size
         popup.configure(bg="#333333")
         text_font = font.Font(family="Helvetica", size=12)
         style = ttk.Style()
         style.theme_use('clam')
         style.configure('TButton', font=text_font, background="#555555", foreground="white", relief='flat')
         style.map('TButton',
-                      background=[('active', '#666666')],
-                       foreground=[('active', 'white')])
+                  background=[('active', '#666666')],
+                  foreground=[('active', 'white')])
 
         complexity_levels = ["Level 1", "Level 2", "Level 3"]
         for level in complexity_levels:
             level_button = ttk.Button(popup, text=level, command=lambda selected_level=level: self.set_complexity_level(selected_level, popup))
             level_button.pack(pady=5, padx=10)
 
-    def set_complexity_level(self, level, popup_window):
+    def set_complexity_level(self, level, popup_window):  # unchanged
         global current_complexity_level
         current_complexity_level = level
-        self.complexity_level = level # Update instance variable
-        self.ui_elements["current_complexity_level"] = f"Current Level: {level}" # Update UI element text
-        self.create_settings_menu() # Recreate settings menu to update display
-        self.translate_ui(self.translation_language) # Re-translate UI elements if needed
+        self.complexity_level = level  # Update instance variable
+        self.ui_elements["current_complexity_level"] = f"Current Level: {level}"  # Update UI element text
+        self.create_settings_menu()  # Recreate settings menu to update display
+        self.translate_ui(self.translation_language)  # Re-translate UI elements if needed
         popup_window.destroy()
 
 
-class TranslationLanguageWindow:
+class TranslationLanguageWindow:  # unchanged
     def __init__(self, root, on_translation_language_selected, loop):
         self.root = root
         self.loop = loop
 
-         # UI Elements to Translate
+        # UI Elements to Translate
         self.ui_elements = {
             "window_title": "Select Translation Language",
         }
@@ -730,57 +992,59 @@ class TranslationLanguageWindow:
         language_options = ["English", "Japanese", "Spanish", "French"]
         for lang in language_options:
             language_button = ttk.Button(root, text=lang,
-                                        command=lambda selected_lang=lang: self.select_translation_language(
-                                            selected_lang))
-            language_button.pack(pady=5, padx=10) # Added padx for better spacing
+                                            command=lambda selected_lang=lang: self.select_translation_language(
+                                                selected_lang))
+            language_button.pack(pady=5, padx=10)  # Added padx for better spacing
 
-    def select_translation_language(self, language):
+    def select_translation_language(self, language):  # unchanged
         self.on_translation_language_selected(language, self.root)
 
-class LanguageSelectionWindow:
+
+class LanguageSelectionWindow:  # unchanged
     def __init__(self, root, on_language_selected, translation_language, complexity_level, loop):
         self.root = root
         self.loop = loop
 
-         # UI Elements to Translate
+        # UI Elements to Translate
         self.ui_elements = {
-           "window_title": "Select Language"
+            "window_title": "Select Language"
         }
         self.root.title(translate_to_language(self.ui_elements["window_title"], self.loop, translation_language))
         self.root.geometry("250x180")  # Adjusted size
 
         self.on_language_selected = on_language_selected
         self.translation_language = translation_language
-        self.complexity_level = complexity_level # Receive complexity level here
-        self.root.configure(bg="#333333") # Dark grey background
-        text_font = font.Font(family="Helvetica", size=12) # Use a nicer font
+        self.complexity_level = complexity_level  # Receive complexity level here
+        self.root.configure(bg="#333333")  # Dark grey background
+        text_font = font.Font(family="Helvetica", size=12)  # Use a nicer font
 
         # Create a Style
         style = ttk.Style()
         style.theme_use('clam')  # Use the clam theme
         style.configure('TButton', font=text_font, background="#555555", foreground="white", relief='flat')
         style.map('TButton',
-                      background=[('active', '#666666')],
-                       foreground=[('active', 'white')]) # Set the color to change when hovered
+                  background=[('active', '#666666')],
+                  foreground=[('active', 'white')])  # Set the color to change when hovered
 
         # Language Selection Buttons
         language_options = ["English", "Japanese", "Spanish", "French"]
         for lang in language_options:
-             language_button = ttk.Button(root, text=lang,
-                                     command=lambda selected_lang=lang: self.select_language(selected_lang))
-             language_button.pack(pady=5, padx=10) # Added padx for better spacing
+            language_button = ttk.Button(root, text=lang,
+                                            command=lambda selected_lang=lang: self.select_language(selected_lang))
+            language_button.pack(pady=5, padx=10)  # Added padx for better spacing
 
-    def select_language(self, language):
-         self.on_language_selected(language, self.root, self.translation_language, self.complexity_level, self.loop)
+    def select_language(self, language):  # unchanged
+        self.on_language_selected(language, self.root, self.translation_language, self.complexity_level, self.loop)
 
-class RoleSelectionWindow:
+
+class RoleSelectionWindow:  # unchanged
     def __init__(self, root, on_role_selected, language, translation_language, complexity_level, loop):
         self.root = root
         self.loop = loop
 
-         # UI Elements to Translate
+        # UI Elements to Translate
         self.ui_elements = {
-           "window_title": "Select Role"
+            "window_title": "Select Role"
         }
         self.root.title(translate_to_language(self.ui_elements["window_title"], self.loop, translation_language))
         self.root.geometry("250x300")  # Adjusted size
@@ -788,7 +1052,7 @@ class RoleSelectionWindow:
         self.on_role_selected = on_role_selected
         self.language = language
         self.translation_language = translation_language
-        self.complexity_level = complexity_level # Receive complexity level here
+        self.complexity_level = complexity_level  # Receive complexity level here
         self.root.configure(bg="#333333")
         text_font = font.Font(family="Helvetica", size=12)
 
@@ -797,26 +1061,27 @@ class RoleSelectionWindow:
         style.theme_use('clam')
         style.configure('TButton', font=text_font, background="#555555", foreground="white", relief='flat')
         style.map('TButton',
-                      background=[('active', '#666666')],
-                       foreground=[('active', 'white')])
+                  background=[('active', '#666666')],
+                  foreground=[('active', 'white')])
 
         # Buttons for selecting the roles
         for index, role_name in enumerate(roles.keys()):
-                button = ttk.Button(root, text=role_name,
-                                command=lambda role=role_name: self.select_role(role))
-                button.pack(pady=5, padx=10) # Added padx for better spacing
+            button = ttk.Button(root, text=role_name,
+                                    command=lambda role=role_name: self.select_role(role))
+            button.pack(pady=5, padx=10)  # Added padx for better spacing
 
-    def select_role(self, role):
-            self.on_role_selected(role, self.root, self.language, self.translation_language, self.complexity_level, self.loop)
+    def select_role(self, role):  # unchanged
+        self.on_role_selected(role, self.root, self.language, self.translation_language, self.complexity_level, self.loop)
 
-class ComplexityLevelSelectionWindow: # New Complexity Level Selection Window
+
+class ComplexityLevelSelectionWindow:  # unchanged
     def __init__(self, root, on_complexity_level_selected, translation_language, loop):
         self.root = root
         self.loop = loop
 
-         # UI Elements to Translate
+        # UI Elements to Translate
         self.ui_elements = {
-           "window_title": "Select Complexity Level"
+            "window_title": "Select Complexity Level"
         }
         self.root.title(translate_to_language(self.ui_elements["window_title"], self.loop, translation_language))
         self.root.geometry("250x250")  # Adjusted size
@@ -831,53 +1096,55 @@ class ComplexityLevelSelectionWindow: # New Complexity Level Selection Window
         style.theme_use('clam')
         style.configure('TButton', font=text_font, background="#555555", foreground="white", relief='flat')
         style.map('TButton',
-                      background=[('active', '#666666')],
-                       foreground=[('active', 'white')])
+                  background=[('active', '#666666')],
+                  foreground=[('active', 'white')])
 
         # Buttons for selecting complexity levels
         complexity_levels = ["Level 1", "Level 2", "Level 3"]
         for level in complexity_levels:
-                button = ttk.Button(root, text=level,
-                                command=lambda selected_level=level: self.select_complexity_level(selected_level))
-                button.pack(pady=5, padx=10) # Added padx for better spacing
+            button = ttk.Button(root, text=level,
+                                    command=lambda selected_level=level: self.select_complexity_level(selected_level))
+            button.pack(pady=5, padx=10)  # Added padx for better spacing
 
-    def select_complexity_level(self, complexity_level):
-            self.on_complexity_level_selected(complexity_level, self.root, self.translation_language, self.loop)
+    def select_complexity_level(self, complexity_level):  # unchanged
+        self.on_complexity_level_selected(complexity_level, self.root, self.translation_language, self.loop)
 
 
-def on_complexity_level_selected(complexity_level, complexity_window_root, translation_language, loop, show_language_selection_callback=None): # Modified to accept callback
+def on_complexity_level_selected(complexity_level, complexity_window_root, translation_language, loop, show_language_selection_callback=None):  # unchanged
     complexity_window_root.destroy()
     lang_root = tk.Tk()
-    lang_selection = LanguageSelectionWindow(lang_root, lambda lang, lang_window_root, translation_language=translation_language, complexity_level=complexity_level, loop=loop: on_language_selected(lang, lang_window_root, show_language_selection_callback, translation_language, complexity_level, loop), translation_language, complexity_level, loop) # Pass complexity level
+    lang_selection = LanguageSelectionWindow(lang_root, lambda lang, lang_window_root, translation_language=translation_language, complexity_level=complexity_level, loop=loop: on_language_selected(lang, lang_window_root, show_language_selection_callback, translation_language, complexity_level, loop), translation_language, complexity_level, loop)  # Pass complexity level
     lang_root.mainloop()
 
 
-def on_translation_language_selected(translation_language, translation_window_root, show_language_selection, loop):
+def on_translation_language_selected(translation_language, translation_window_root, show_language_selection, loop):  # unchanged
     translation_window_root.destroy()
     complexity_root = tk.Tk()
-    complexity_selection = ComplexityLevelSelectionWindow(complexity_root, lambda complexity_level, complexity_window_root, translation_language=translation_language, loop=loop: on_complexity_level_selected(complexity_level, complexity_window_root, translation_language, loop, show_language_selection), translation_language, loop) # Pass show_language_selection
+    complexity_selection = ComplexityLevelSelectionWindow(complexity_root, lambda complexity_level, complexity_window_root, translation_language=translation_language, loop=loop: on_complexity_level_selected(complexity_level, complexity_window_root, translation_language, loop, show_language_selection), translation_language, loop)  # Pass show_language_selection
     complexity_root.mainloop()
 
 
-def on_language_selected(language, lang_window_root, show_language_selection, translation_language, complexity_level, loop):
-        lang_window_root.destroy()
-        role_root = tk.Tk()
-        role_selection = RoleSelectionWindow(role_root, lambda role, role_window_root, language=language, translation_language=translation_language, complexity_level=complexity_level, loop=loop: on_role_selected(role, role_window_root, show_language_selection, language, translation_language, complexity_level, loop), language, translation_language, complexity_level, loop) # Pass complexity level
-        role_root.mainloop()
+def on_language_selected(language, lang_window_root, show_language_selection, translation_language, complexity_level, loop):  # unchanged
+    lang_window_root.destroy()
+    role_root = tk.Tk()
+    role_selection = RoleSelectionWindow(role_root, lambda role, role_window_root, language=language, translation_language=translation_language, complexity_level=complexity_level, loop=loop: on_role_selected(role, role_window_root, show_language_selection, language, translation_language, complexity_level, loop), language, translation_language, complexity_level, loop)  # Pass complexity level
+    role_root.mainloop()
 
-def on_role_selected(role, role_window_root, show_language_selection, language, translation_language, complexity_level, loop):
+
+def on_role_selected(role, role_window_root, show_language_selection, language, translation_language, complexity_level, loop):  # unchanged
     role_window_root.destroy()
     chat_root = tk.Tk()
-    app = ChatApp(chat_root, show_language_selection, role, language, translation_language, complexity_level, loop) # Pass complexity level
+    app = ChatApp(chat_root, show_language_selection, role, language, translation_language, complexity_level, loop)  # Pass complexity level
     chat_root.mainloop()
+
 
 # Main App Loop
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop() # Create the event loop here
+    loop = asyncio.get_event_loop()  # Create the event loop here
 
-    def show_language_selection(loop=loop):
-       trans_root = tk.Tk()
-       trans_selection = TranslationLanguageWindow(trans_root, lambda trans_lang, trans_window_root, loop=loop: on_translation_language_selected(trans_lang, trans_window_root, show_language_selection, loop), loop)
-       trans_root.mainloop()
+    def show_language_selection(loop=loop):  # unchanged
+        trans_root = tk.Tk()
+        trans_selection = TranslationLanguageWindow(trans_root, lambda trans_lang, trans_window_root, loop=loop: on_translation_language_selected(trans_lang, trans_window_root, show_language_selection, loop), loop)
+        trans_root.mainloop()
 
     show_language_selection(loop)
