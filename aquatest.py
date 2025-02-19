@@ -3,7 +3,7 @@ from googletrans import Translator
 import os
 from gtts import gTTS
 import tkinter as tk
-from tkinter import font, scrolledtext, ttk, messagebox  # Import messagebox
+from tkinter import font, scrolledtext, ttk, messagebox, simpledialog  # Import messagebox
 import asyncio
 import re
 import speech_recognition as sr  # Import speech_recognition - will be removed
@@ -468,7 +468,16 @@ class ChatApp:
         self.study_frame.pack(fill=tk.BOTH, expand=True) # Pack study frame
 
     def hide_study_ui(self):
+        # Destroy all widgets in study_frame before forgetting the frame
+        for widget in self.study_frame.winfo_children():
+            widget.destroy()
         self.study_frame.pack_forget() # Hide study frame
+
+    def hide_add_card_ui(self):
+        # Destroy all widgets in add_card_frame before forgetting the frame
+        for widget in self.add_card_frame.winfo_children():
+            widget.destroy()
+        self.add_card_frame.pack_forget() # Hide add card frame
 
     def show_add_card_ui(self):
         if not self.current_deck:
@@ -498,9 +507,6 @@ class ChatApp:
 
         self.add_card_frame.pack(fill=tk.BOTH, expand=True) # Pack add card frame
 
-    def hide_add_card_ui(self):
-        self.add_card_frame.pack_forget() # Hide add card frame
-
     def populate_deck_listbox(self):
         self.deck_listbox.delete(0, tk.END)  # Clear existing items
         for deck_name in self.decks:
@@ -521,12 +527,14 @@ class ChatApp:
             self.delete_deck_button.config(state=tk.DISABLED) # Disable if no selection
 
     def create_deck(self):
+        print("create_deck function called!")  # Debug print 1
         # Create Deck Dialog
         deck_name = tk.simpledialog.askstring(
             title=translate_to_language("Create Deck", self.loop, self.translation_language),
             prompt=translate_to_language("Enter deck name:", self.loop, self.translation_language),
             parent=self.flashcard_manager_window  # Set parent to manager window
         )
+        print(f"Deck name entered: {deck_name}") # Debug print 2
         if deck_name:
             if deck_name in self.decks:
                 messagebox.showerror(translate_to_language("Error", self.loop, self.translation_language), translate_to_language("Deck already exists!", self.loop, self.translation_language), parent=self.flashcard_manager_window) # Set parent
@@ -534,6 +542,9 @@ class ChatApp:
                 self.decks[deck_name] = []
                 self.populate_deck_listbox()
                 self.save_decks() # Save the decks
+                print(f"Deck '{deck_name}' created and saved.") # Debug print 3
+        else:
+            print("Deck creation cancelled or no name entered.") # Debug print 4
 
     def add_card(self, front_text, back_text): # Removed add_card_window parameter
         if front_text and back_text:
