@@ -8,7 +8,7 @@ import asyncio
 
 
 # Configure Google Gemini API
-genai.configure(api_key="AIzaSyAurbpVsBDTcNp7VxQ4b8DTBIWjq2_PekA")
+genai.configure(api_key="API")
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 # Translator for Japanese to English
