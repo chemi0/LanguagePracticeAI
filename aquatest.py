@@ -19,7 +19,7 @@ import json  # Import json for saving and loading decks
 
 # --- (Existing Code - API Keys, Model Setup, Constants, etc.) ---
 # Configure Google Gemini API
-genai.configure(api_key="AIzaSyAurbpVsBDTcNp7VxQ4b8DTBIWjq2_PekA")  # Replace with your actual API key
+genai.configure(api_key="ENTER_API")  # Replace with your actual API key
 model_gemini = genai.GenerativeModel("gemini-1.5-flash")  # Renamed to avoid confusion with whisper model
 
 # Translator for Japanese to English
