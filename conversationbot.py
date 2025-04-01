@@ -12,7 +12,7 @@ import time # Import time - although not strictly needed in this version, keepin
 import pygame # Import pygame for better audio control
 
 # Configure Google Gemini API
-genai.configure(api_key="AIzaSyAurbpVsBDTcNp7VxQ4b8DTBIWjq2_PekA") # Replace with your actual API key
+genai.configure(api_key="ENTER_API") # Replace with your actual API key
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 # Translator for Japanese to English
