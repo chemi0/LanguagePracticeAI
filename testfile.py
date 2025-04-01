@@ -17,7 +17,7 @@ import torch # Import torch
 import tempfile # Import tempfile - might be needed, but not used in this version
 
 # Configure Google Gemini API
-genai.configure(api_key="AIzaSyAurbpVsBDTcNp7VxQ4b8DTBIWjq2_PekA") # Replace with your actual API key
+genai.configure(api_key="API") # Replace with your actual API key
 model_gemini = genai.GenerativeModel("gemini-1.5-flash") # Renamed to avoid confusion with whisper model
 
 # Translator for Japanese to English
